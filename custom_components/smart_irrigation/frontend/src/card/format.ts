@@ -215,12 +215,15 @@ export type NextStartState =
  * The time in the info payload is worked out arithmetically: it is there
  * whether or not anything will act on it. The card printed it under the
  * "none" trigger, which starts nothing, and while no trigger was armed. Only
- * the start trigger is armed or not: the main program's own schedules are
- * not that trigger, and their start is shown as it is.
+ * the start trigger is armed or not: with "Calculate and water" the programs'
+ * schedules start the watering, not that trigger, and their start is shown as
+ * it is.
  */
 export const nextStartState = (info: any): NextStartState => {
   if (info?.irrigation_enabled === false) return "off";
-  const bySchedules = info?.start_source === "main_schedules";
+  // Anything but the trigger: the programs' schedules ("main_schedules" is
+  // what it was called while there was a main program).
+  const bySchedules = !!info?.start_source && info.start_source !== "trigger";
   if (!bySchedules && info?.active_start_trigger === "none") {
     return "no_trigger";
   }
@@ -239,24 +242,11 @@ export const zoneWithoutValve = (info: any, zoneId: number): boolean =>
     (zone) => Number(zone.id) === Number(zoneId),
   );
 
-/** The name the main program is stored under until somebody renames it. */
-export const MAIN_PROGRAM_STORED_NAME = "Main program";
-
-/**
- * A program's name as the card shows it.
- *
- * The main program is stored as "Main program", in English, whatever the
- * language: the panel shows it in the user's language and the card showed
- * the stored name. A name of the user's own is kept as it is.
- */
-export const programLabel = (
-  program: { program_id: string; name?: string },
-  mainName: string,
-): string =>
-  program.program_id === "main" &&
-  (!program.name || program.name === MAIN_PROGRAM_STORED_NAME)
-    ? mainName
-    : (program.name ?? program.program_id);
+/** A program's name as the card shows it: its own, or its id without one. */
+export const programLabel = (program: {
+  program_id: string;
+  name?: string;
+}): string => program.name || program.program_id;
 
 /**
  * A zone Smart Irrigation calculates that has not been calculated yet: right
@@ -301,10 +291,48 @@ export interface LiveState {
   valves?: {
     zone_id: number;
     zone?: string | null;
+    /** What the zone has left: soaks and later passes included. */
+    remaining_seconds: number;
+    /** The share of the zone's water delivered. */
+    percent: number;
+    /** The pass under way and how many, for a zone watered in passes. */
+    pass?: number;
+    passes?: number;
+    /** The volume the zone stops at, in litres, when its step sets one. */
+    max_litres?: number;
+  }[];
+  /** Zones soaking between two passes: closed, and not done yet. */
+  soaking?: {
+    zone_id: number;
+    zone?: string | null;
+    /** When the next pass opens (ISO). */
+    until: string;
+    next_pass: number;
+    passes: number;
     remaining_seconds: number;
     percent: number;
   }[];
+  /** Zones waiting for their pump or main valve to come up. */
+  starting?: {
+    zone_id: number;
+    zone?: string | null;
+    supply?: string | null;
+    remaining_seconds: number;
+  }[];
 }
+
+/**
+ * The zone soaking between two passes, or undefined. While it soaked nothing
+ * said it was still in its run: Start read "watering" with no zone, the card
+ * showed it at rest (UX walk of 13 Nov., Q6).
+ */
+export const soakingZone = (
+  live: LiveState | null | undefined,
+  zoneId: number | string | undefined,
+) =>
+  zoneId === undefined || zoneId === null
+    ? undefined
+    : (live?.soaking || []).find((v) => Number(v.zone_id) === Number(zoneId));
 
 /**
  * The run of ours a zone is in right now, or undefined.
@@ -337,6 +365,8 @@ export const wateringNow = (live: LiveState | null | undefined): boolean =>
   (live.paused === true ||
     !!live.cycle ||
     (live.valves || []).length > 0 ||
+    (live.soaking || []).length > 0 ||
+    (live.starting || []).length > 0 ||
     (live.programs || []).some((p) => p.state === "running"));
 
 /**

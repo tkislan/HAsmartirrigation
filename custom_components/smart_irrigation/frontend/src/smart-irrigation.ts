@@ -11,9 +11,9 @@ import {
   mdiWeatherPartlyCloudy,
 } from "@mdi/js";
 
+import "./common/si-info";
 import "./views/general/view-general.ts";
 import "./views/zones/view-zones.ts";
-import "./views/modules/view-modules.ts";
 import "./views/mappings/view-mappings.ts";
 import "./views/weatherservice/view-weatherservice.ts";
 import "./views/history/view-history.ts";
@@ -42,7 +42,6 @@ enum EMenuItems {
   Info = "info",
   General = "general",
   Zones = "zones",
-  Modules = "modules",
   Mappings = "mappings",
   WeatherService = "weatherservice",
   // The rain, freeze and wind checks, beside the weather they read (#972).
@@ -85,12 +84,9 @@ const TAB_GROUPS: { id: string; pages: EMenuItems[] }[] = [
 ];
 
 /**
- * Two pages are in no group, and their addresses still work; each shows under
- * Settings while it is open, so there is a way back.
- *
- * The engines page, because a zone says how it is calculated and the engine
- * behind it is created and configured from there: "modules" is not a thing
- * anyone should have to open.
+ * Pages in no group, whose addresses still work; each shows under Settings
+ * while it is open, so there is a way back. (The engines page is gone: a zone
+ * says how it is calculated and sets its engine's options itself.)
  *
  * The setup assistant, because it is for an installation that has nothing yet.
  * Somebody with two zones was asking why a tab was inviting them to set up
@@ -98,7 +94,6 @@ const TAB_GROUPS: { id: string; pages: EMenuItems[] }[] = [
  * under Settings, for a second zone or a fresh start.
  */
 const UNLISTED_PAGE_GROUP: Record<string, string> = {
-  [EMenuItems.Modules]: "settings",
   [EMenuItems.Setup]: "settings",
   // Bringing an Irrigation Unlimited configuration over: once, from Settings.
   [EMenuItems.IuImport]: "settings",
@@ -422,14 +417,6 @@ export class SmartIrrigationPanel extends LitElement {
             .path=${path}
           ></smart-irrigation-view-zones>
         `;
-      case "modules":
-        return html`
-          <smart-irrigation-view-modules
-            .hass=${this.hass}
-            .narrow=${this.narrow}
-            .path=${path}
-          ></smart-irrigation-view-modules>
-        `;
       case "mappings":
         // Continuous updates record the sensors of every group, and decide
         // how a group combines its readings: above the groups, not with the
@@ -624,9 +611,24 @@ export class SmartIrrigationPanel extends LitElement {
           display: flex;
           flex-direction: column;
           /* Home Assistant gives a custom panel no height of its own, so the
-             screen height is used (dvh follows the mobile address bar). */
-          height: 100vh;
-          height: 100dvh;
+             screen height is used (dvh follows the mobile address bar). Since
+             mid-2026 it pads the panel's container with the status bar and
+             navigation bar insets (home-assistant/frontend#53127): a full
+             screen height plus that padding overshot the screen again, and
+             the two scrollers were back on a phone (#1054). The insets are
+             taken off; they are 0 where there are none. */
+          height: calc(
+            100vh - var(--safe-area-inset-top, 0px) - var(
+                --safe-area-inset-bottom,
+                0px
+              )
+          );
+          height: calc(
+            100dvh - var(--safe-area-inset-top, 0px) - var(
+                --safe-area-inset-bottom,
+                0px
+              )
+          );
         }
         .header {
           flex: none;

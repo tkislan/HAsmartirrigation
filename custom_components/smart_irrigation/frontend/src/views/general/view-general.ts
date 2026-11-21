@@ -12,12 +12,15 @@ import { UnsubscribeFunc } from "home-assistant-js-websocket";
 
 import {
   fetchConfig,
+  fetchIrrigationHistory,
   fetchIrrigationInfo,
   fetchMappings,
   fetchZones,
+  IrrigationHistoryRecord,
   saveConfig,
   saveZone,
 } from "../../data/websockets";
+import { todayRuns } from "../../data/week";
 import { SubscribeMixin } from "../../subscribe-mixin";
 import { localize } from "../../../localize/localize";
 import {
@@ -38,7 +41,29 @@ import {
   countLabel,
   programCanRun,
 } from "../../helpers";
-import { loadHaForm } from "../../load-ha-elements";
+import { loadHaForm, loadHaYamlEditor } from "../../load-ha-elements";
+import "./program-timeline";
+import "./week-view";
+import "./program-flow";
+import { programFlow, weatherVerdict } from "../../data/program-flow";
+import { Timeline } from "../../data/timeline";
+import { programFromYaml, programToYaml } from "../../data/program-yaml";
+import {
+  afterIsMissing,
+  dependentsOf,
+  wouldLoop,
+} from "../../data/program-chain";
+import { notifyTargets } from "../../data/notify-targets";
+import {
+  hiddenInAdvanced,
+  hiddenLine,
+  hiddenOptions,
+  SKIP_CONDITION_IDS,
+  withProgram,
+  withSchedule,
+  withStep,
+} from "../../data/yaml-only";
+import { formatNumber } from "../../number-format";
 import "../../dialogs/trigger-dialog";
 import { askConfirmation } from "../../dialogs/confirmation-dialog";
 import {
@@ -50,6 +75,7 @@ import {
   SmartIrrigationSupply,
   SmartIrrigationZone,
   IrrigationStartTrigger,
+  SkipEvaluation,
 } from "../../types";
 import { globalStyle } from "../../styles/global-style";
 import { modernStyle } from "../../styles/modern-style";
@@ -88,13 +114,16 @@ import {
 import {
   mdiPlus,
   mdiPencil,
+  mdiFormSelect,
   mdiDelete,
   mdiMenuDown,
   mdiMinus,
   mdiPlay,
-  mdiPause,
   mdiStop,
-  mdiSkipNext,
+  mdiCheck,
+  mdiCodeBraces,
+  mdiClose,
+  mdiTune,
 } from "@mdi/js";
 
 /**
@@ -103,16 +132,25 @@ import {
  * Kept outside the element: each tab renders its own template, so switching
  * tabs creates a new element and an instance field would fold everything back.
  */
-// The skip condition ids of a schedule, as in const.py SKIP_CONDITION_IDS.
-const SKIP_CONDITION_IDS = [
-  "postponed",
-  "rain_sensor",
-  "freeze",
-  "wind",
-  "precipitation",
-  "days_between",
-  "soil_moisture",
-];
+
+// The days the week view shows, kept by this browser across tabs and reloads
+// (#1051). Storage can be missing or refused (private window): then 7.
+const WEEK_DAYS_KEY = "smart_irrigation.week_days";
+function readWeekDays(): number {
+  try {
+    const days = Number(window.localStorage.getItem(WEEK_DAYS_KEY));
+    return [3, 7, 14].includes(days) ? days : 7;
+  } catch {
+    return 7;
+  }
+}
+function saveWeekDays(days: number): void {
+  try {
+    window.localStorage.setItem(WEEK_DAYS_KEY, String(days));
+  } catch {
+    // Not kept: the next visit shows 7 days.
+  }
+}
 
 const UNFOLDED = new Set<string>();
 // "More options" that hold a setting open by themselves; one closed by
@@ -124,6 +162,48 @@ const RUN_OPTIONS: Record<string, { seconds?: string; replace?: boolean }> = {};
 const ADJUST_OPTIONS: Record<
   string,
   { percent?: string; seconds?: string; hours?: string }
+> = {};
+
+/** What the backend makes of a program as written (program_preview). */
+interface ProgramPreview {
+  program: SmartIrrigationProgram;
+  timeline: Timeline;
+  unknown_zones: number[];
+  unknown_zone_names: string[];
+  zones_not_watered: { zone_id: number; zone: string | null }[];
+  /** Names of the programs that would start each other in a loop, or null. */
+  chain_loop?: string[] | null;
+  /** What an "after" schedule names that is no program. */
+  unknown_after_programs?: string[];
+}
+
+/**
+ * The timeline of each program as last asked, by program id, with what it was
+ * asked for: asked again when the program changes or it is a minute old.
+ */
+// How each program's run is drawn: the flow (default) or the timeline.
+const RUN_VIEW: Record<string, "flow" | "timeline"> = {};
+
+const PREVIEWS: Record<
+  string,
+  { key: string; at: number; data?: ProgramPreview; pending?: boolean }
+> = {};
+
+/**
+ * A program edited as YAML, by program id ("" for a new one): what the editor
+ * opened on (kept, so a render does not put it back over what is typed), what
+ * is typed, whether it reads as YAML, and what the backend makes of it.
+ */
+const YAML_EDITS: Record<
+  string,
+  {
+    initial: unknown;
+    value?: unknown;
+    valid: boolean;
+    preview?: ProgramPreview;
+    key?: string;
+    error?: string;
+  }
 > = {};
 
 @customElement("smart-irrigation-view-general")
@@ -145,11 +225,17 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
   // What the programs are doing, and what they will do (full controller).
   @property({ attribute: false }) planning: any[] = [];
   @property({ attribute: false }) programsState?: any;
-  // What starts the main program, from the `info` data: "trigger" (the start
-  // trigger) or "main_schedules" (the main program's own schedules).
-  @property({ attribute: false }) startSource?: string;
+  // What the skip checks say for the next start, for the flow's weather node
+  // (Programs page only, read with the planning).
+  private _skipPreview?: SkipEvaluation | null;
   private _liveTimer?: number;
   private _unfolded = UNFOLDED;
+
+  // How many days the week view shows (3, 7 or 14).
+  private _weekDays = readWeekDays();
+  // The last zone runs watered, for today's row of the week view.
+  private _history: IrrigationHistoryRecord[] = [];
+  private _wasWatering = false;
 
   private _isOpen(key: string): boolean {
     return this._unfolded.has(key);
@@ -353,48 +439,69 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
         ${localize("common.loading-messages.general", this.hass.language)}
       </div>`;
     } else {
-      // When the watering duration is calculated is one question. What starts
-      // the watering is decided elsewhere, by the start trigger: neither answer
-      // is a switch for "we will water".
+      // When the watering duration is calculated is one question; what starts
+      // the watering (a schedule, or the start event) is another.
       const base = "panels.general.cards.automatic-duration-calculation.labels";
       const calcWhen = this.config.recalculate_before_start
         ? "start"
         : this.config.autocalcenabled
           ? "time"
           : "manual";
-      let r1 = html` <div class="card-content">
-          ${localize(
-            "panels.general.cards.automatic-duration-calculation.description",
-            this.hass.language,
-          )}
-        </div>
-        <div class="card-content">
-          ${this._selectRow(
-            html`${localize(`${base}.calc-when`, this.hass.language)}
-              <div class="setting-hint">
-                ${localize(`${base}.calc-when-hint`, this.hass.language)}
-              </div>`,
-            html`
-              <option value="time" ?selected=${calcWhen === "time"}>
-                ${localize(`${base}.calc-when-time`, this.hass.language)}
-              </option>
-              <option value="start" ?selected=${calcWhen === "start"}>
-                ${localize(`${base}.calc-when-start`, this.hass.language)}
-              </option>
-              <option value="manual" ?selected=${calcWhen === "manual"}>
-                ${localize(`${base}.calc-when-manual`, this.hass.language)}
-              </option>
-            `,
-            (e: Event) => {
-              const value = (e.target as HTMLSelectElement).value;
-              this.handleConfigChange({
-                autocalcenabled: value === "time",
-                recalculate_before_start: value === "start",
-              });
-            },
-          )}
-        </div>`;
-      if (calcWhen === "time") {
+      // When Smart Irrigation waters, the duration is best worked out just
+      // before each start, with the freshest weather: there is nothing to
+      // choose, in any mode. The choice matters when something else starts
+      // the watering ("Calculate only"), and stays in sight when another
+      // moment was stored, so that it can be put back.
+      const advancedMode = this.config.ui_mode === "advanced";
+      // "Calculate only" has no program: its start is the start event.
+      const calcOnly = this.config.full_controller !== true;
+      const showCalcWhen = calcOnly || calcWhen !== "start";
+      // The hourly equation is on for a new installation; the daily one is
+      // there for the older ones. The advanced mode only, unless it is off.
+      const showHourly = advancedMode || !this.config.hourly_calculation;
+      const showEffectiveRain = advancedMode || !this.config.effective_rain;
+      const showCalcLog = advancedMode || !!this.config.calc_log_enabled;
+      let r1 = html`${showCalcWhen
+        ? html`<div class="card-content">
+            ${this._selectRow(
+              html`${localize(`${base}.calc-when`, this.hass.language)}
+                <si-info>
+                  ${localize(
+                    calcOnly
+                      ? `${base}.calc-when-hint-calc-only`
+                      : `${base}.calc-when-hint`,
+                    this.hass.language,
+                  )}
+                </si-info>`,
+              html`
+                <option value="time" ?selected=${calcWhen === "time"}>
+                  ${localize(`${base}.calc-when-time`, this.hass.language)}
+                </option>
+                <option value="start" ?selected=${calcWhen === "start"}>
+                  ${localize(
+                    calcOnly
+                      ? `${base}.calc-when-start-event`
+                      : `${base}.calc-when-start`,
+                    this.hass.language,
+                  )}
+                </option>
+                <option value="manual" ?selected=${calcWhen === "manual"}>
+                  ${localize(`${base}.calc-when-manual`, this.hass.language)}
+                </option>
+              `,
+              (e: Event) => {
+                const value = (e.target as HTMLSelectElement).value;
+                this.handleConfigChange({
+                  autocalcenabled: value === "time",
+                  recalculate_before_start: value === "start",
+                });
+              },
+            )}
+          </div>`
+        : ""}`;
+      // "Just before each start" keeps the daily calculation too, at this
+      // time, so the water balance moves between two starts.
+      if (calcWhen === "time" || (calcWhen === "start" && showCalcWhen)) {
         r1 = html`${r1}
           <div class="card-content">
             ${this._timeRow(
@@ -406,88 +513,143 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
           </div>`;
       }
       // The form of the equation, which has nothing to do with the moment.
+      const showRows = showHourly || showEffectiveRain || showCalcLog;
       r1 = html`${r1}
-        <div class="card-content">
-          <div class="setting-row">
-            <div class="setting-label">
-              ${localize(`${base}.hourly-calculation`, this.hass.language)}
-              <div class="setting-hint">
-                ${localize(
-                  `${base}.hourly-calculation-hint`,
-                  this.hass.language,
-                )}
-              </div>
-            </div>
-            <ha-switch
-              .checked=${this.config.hourly_calculation}
-              @change=${(e: Event) =>
-                this.handleConfigChange({
-                  hourly_calculation: (e.target as any).checked,
-                })}
-            ></ha-switch>
-          </div>
-          ${
-            // On for a new installation, and not a decision anybody has to take:
-            // a light shower does not reach the roots. It acts on the rain that
-            // fell, in every calculation, which is why it lives here and not
-            // with the forecast. The advanced mode only, unless it was turned
-            // off, so that is not hidden.
-            this.config.ui_mode === "advanced" || !this.config.effective_rain
+      ${showRows
+        ? html`<div class="card-content">
+            ${showHourly
               ? html`<div class="setting-row">
                   <div class="setting-label">
                     ${localize(
-                      "weather_skip.effective_rain_label",
+                      `${base}.hourly-calculation`,
                       this.hass.language,
-                    )}
-                    <div class="setting-hint">
-                      ${localize(
-                        "weather_skip.effective_rain_description",
+                    )}<si-info
+                      >${localize(
+                        `${base}.hourly-calculation-hint`,
                         this.hass.language,
-                      )}
-                    </div>
+                      )}</si-info
+                    >
                   </div>
                   <ha-switch
-                    .checked=${!!this.config.effective_rain}
+                    .checked=${this.config.hourly_calculation}
                     @change=${(e: Event) =>
                       this.handleConfigChange({
-                        effective_rain: (e.target as any).checked,
+                        hourly_calculation: (e.target as any).checked,
                       })}
                   ></ha-switch>
                 </div>`
-              : ""
-          }
-        </div>`;
-      r1 = html`<ha-card
-        header="${localize(
-          "panels.general.cards.automatic-duration-calculation.header",
-          this.hass.language,
-        )}"
-      >
-        ${r1}</ha-card
-      >`;
-      let r2 = html` <div class="card-content">
-          ${localize(
-            "panels.general.cards.automatic-update.description",
-            this.hass.language,
-          )}
-        </div>
-        <div class="card-content">
-          <div class="setting-row">
-            <div class="setting-label">
-              ${localize(
-                "panels.general.cards.automatic-update.labels.auto-update-enabled",
-                this.hass.language,
-              )}
-            </div>
-            <ha-switch
-              .checked=${this.config.autoupdateenabled}
-              @change=${(e: Event) =>
-                this.saveData({
-                  autoupdateenabled: (e.target as any).checked,
-                })}
-            ></ha-switch>
+              : ""}
+            ${
+              // On for a new installation, and not a decision anybody has to take:
+              // a light shower does not reach the roots. It acts on the rain that
+              // fell, in every calculation, which is why it lives here and not
+              // with the forecast. The advanced mode only, unless it was turned
+              // off, so that is not hidden.
+              showEffectiveRain
+                ? html`<div class="setting-row">
+                    <div class="setting-label">
+                      ${localize(
+                        "weather_skip.effective_rain_label",
+                        this.hass.language,
+                      )}<si-info
+                        >${localize(
+                          "weather_skip.effective_rain_description",
+                          this.hass.language,
+                        )}</si-info
+                      >
+                    </div>
+                    <ha-switch
+                      .checked=${!!this.config.effective_rain}
+                      @change=${(e: Event) =>
+                        this.handleConfigChange({
+                          effective_rain: (e.target as any).checked,
+                        })}
+                    ></ha-switch>
+                  </div>`
+                : ""
+            }
+            ${
+              // The calculation audit log, for chasing a calculation down: a
+              // row of this card rather than a card of its own (#1056). The
+              // advanced mode only, unless it is on (it writes a file).
+              showCalcLog
+                ? html`<div class="setting-row">
+                    <div class="setting-label">
+                      ${localize(
+                        "calculation_log.title",
+                        this.hass.language,
+                      )}<si-info
+                        >${localize(
+                          "calculation_log.description",
+                          this.hass.language,
+                        )}
+                        ${localize(
+                          "calculation_log.file_hint",
+                          this.hass.language,
+                        )}</si-info
+                      >
+                    </div>
+                    <ha-switch
+                      .checked=${!!this.config.calc_log_enabled}
+                      @change=${(e: Event) =>
+                        this.handleConfigChange({
+                          calc_log_enabled: (e.target as any).checked,
+                        })}
+                    ></ha-switch>
+                  </div>`
+                : ""
+            }
+          </div>`
+        : ""}`;
+      // Nothing left to choose (Calculate and water, every value at its
+      // default): no card with a title and nothing under it.
+      const showCalcCard = showCalcWhen || showRows;
+      r1 = !showCalcCard
+        ? html``
+        : html`<ha-card
+            ><h1 class="card-header">
+              <span
+                >${localize(
+                  "panels.general.cards.automatic-duration-calculation.header",
+                  this.hass.language,
+                )}<si-info
+                  >${localize(
+                    "panels.general.cards.automatic-duration-calculation.description",
+                    this.hass.language,
+                  )}</si-info
+                ></span
+              >
+            </h1>
+            ${r1}</ha-card
+          >`;
+      // How often the weather is read: every hour, as it is out of the box,
+      // suits everybody. The advanced mode only, unless it was changed (off,
+      // another interval, a delay), so that a setting in use is never hidden.
+      const advanced = this.config.ui_mode === "advanced";
+      const showAutoUpdate =
+        advanced ||
+        this.config.autoupdateenabled === false ||
+        Number(this.config.autoupdateinterval ?? 1) !== 1 ||
+        (this.config.autoupdateschedule ?? AUTO_UPDATE_SCHEDULE_HOURLY) !==
+          AUTO_UPDATE_SCHEDULE_HOURLY ||
+        Number(this.config.autoupdatedelay ?? 0) !== 0;
+      let r2 = html`<div class="card-content">
+        <div class="setting-row">
+          <div class="setting-label">
+            ${localize(
+              "panels.general.cards.automatic-update.labels.auto-update-enabled",
+              this.hass.language,
+            )}
           </div>
-        </div>`;
+          <ha-switch
+            .checked=${this.config.autoupdateenabled}
+            @change=${(e: Event) =>
+              this.saveData({
+                autoupdateenabled: (e.target as any).checked,
+              })}
+          ></ha-switch>
+        </div>
+      </div>`;
       if (this.data.autoupdateenabled) {
         r2 = html`${r2}
           <div class="card-content">
@@ -560,7 +722,12 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
             </div>
           </div>`;
       }
-      if (this.data.autoupdateenabled) {
+      // The delay before the first update is a developer's setting: the
+      // advanced mode only, unless it is set.
+      if (
+        this.data.autoupdateenabled &&
+        (advanced || Number(this.config.autoupdatedelay ?? 0) !== 0)
+      ) {
         r2 = html`${r2}
           <div class="card-content">
             ${this._numRow(
@@ -577,11 +744,20 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
       }
 
       r2 = html`<ha-card
-        header="${localize(
-          "panels.general.cards.automatic-update.header",
-          this.hass.language,
-        )}"
-        >${r2}</ha-card
+        ><h1 class="card-header">
+          <span
+            >${localize(
+              "panels.general.cards.automatic-update.header",
+              this.hass.language,
+            )}<si-info
+              >${localize(
+                "panels.general.cards.automatic-update.description",
+                this.hass.language,
+              )}</si-info
+            ></span
+          >
+        </h1>
+        ${r2}</ha-card
       >`;
 
       // Recording every change of a sensor is for those who have a rain gauge
@@ -590,29 +766,28 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
       const showContinuous =
         this.config.ui_mode === "advanced" || !!this.config.continuousupdates;
       let r4 = html`<div class="card-content">
-          ${localize(
-            "panels.general.cards.continuousupdates.description",
-            this.hass.language,
-          )}
-        </div>
-        <div class="card-content">
-          <div class="setting-row">
-            <div class="setting-label">
-              ${localize(
-                "panels.general.cards.continuousupdates.labels.continuousupdates",
-                this.hass.language,
-              )}
-            </div>
-            <ha-switch
-              .checked=${this.config.continuousupdates}
-              @change=${(e: Event) =>
-                this.handleConfigChange({
-                  continuousupdates: (e.target as any).checked,
-                })}
-            ></ha-switch>
+        <div class="setting-row">
+          <div class="setting-label">
+            ${localize(
+              "panels.general.cards.continuousupdates.labels.continuousupdates",
+              this.hass.language,
+            )}
           </div>
-        </div>`;
-      if (this.data.continuousupdates) {
+          <ha-switch
+            .checked=${this.config.continuousupdates}
+            @change=${(e: Event) =>
+              this.handleConfigChange({
+                continuousupdates: (e.target as any).checked,
+              })}
+          ></ha-switch>
+        </div>
+      </div>`;
+      // The debounce is a developer's setting: the advanced mode only, unless
+      // it was changed from its 100 ms.
+      if (
+        this.data.continuousupdates &&
+        (advanced || Number(this.config.sensor_debounce ?? 100) !== 100)
+      ) {
         r4 = html`${r4}
           <div class="card-content">
             ${this._numRow(
@@ -628,11 +803,20 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
           </div>`;
       }
       r4 = html`<ha-card
-        header="${localize(
-          "panels.general.cards.continuousupdates.header",
-          this.hass.language,
-        )}"
-        >${r4}</ha-card
+        ><h1 class="card-header">
+          <span
+            >${localize(
+              "panels.general.cards.continuousupdates.header",
+              this.hass.language,
+            )}<si-info
+              >${localize(
+                "panels.general.cards.continuousupdates.description",
+                this.hass.language,
+              )}</si-info
+            ></span
+          >
+        </h1>
+        ${r4}</ha-card
       > `;
 
       // Irrigation Start Triggers Card
@@ -641,8 +825,14 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
       // Weather-based Skip Card
       const r6 = this.renderWeatherSkipCard();
 
-      // Coordinate Configuration Card
-      const r7 = this.renderCoordinateCard();
+      // Coordinate Configuration Card: Home Assistant's location is right for
+      // nearly everybody. The advanced mode only, and always once manual
+      // coordinates are on, so the weather is never read out of sight for
+      // somewhere else.
+      const r7 =
+        advanced || this.data.manual_coordinates_enabled
+          ? this.renderCoordinateCard()
+          : html``;
 
       // Days Between Irrigation Card
       const r8 = this.renderDaysBetweenIrrigationCard();
@@ -650,13 +840,8 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
       // Observed Watering (closed-loop bucket) Card
       const r9 = this.renderObservedWateringCard();
 
-      // Calculation audit log Card
-      const r10 = this.renderCalculationLogCard();
-
-      // Whether the bundled blueprints are copied (#930).
-      const r16 = this.renderBlueprintsCard();
-
-      // How much of the panel to show.
+      // How much of the panel to show, and whether the bundled blueprints
+      // are copied (#930): one card of two rows (#1056).
       const r11 = this.renderPanelModeCard();
 
       // Seasonal adjustments (advanced).
@@ -666,7 +851,6 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
       const r14 = this.renderSuppliesCard();
 
       // The full controller, right after how much of the panel to show.
-      const r15 = this.renderFullControllerCard();
 
       // The way to the setup assistant, which is no longer a tab. It comes first:
       // it is where somebody who has nothing set up wants to start.
@@ -680,7 +864,7 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
 
       // Below the weather service: where it is read for, and how often.
       if (this.section === "weather") {
-        return html`${r7}${r2}`;
+        return html`${r7}${showAutoUpdate ? r2 : ""}`;
       }
       // Above the sensor groups: recording their sensors at every change
       // decides how each group's readings are combined, so it sits with them.
@@ -690,13 +874,13 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
       // The checks that hold a run back on the weather, beside the sensors
       // they read.
       if (this.section === "skip") {
-        return this.renderSkipPage(r6);
+        return this.renderSkipPage(html`${r6}${r8}`);
       }
       if (this.section) {
         return this.renderWateringSection(r5);
       }
-      // In full controller mode the start trigger is the main program's, and
-      // lives with it in the Watering tab.
+      // In full controller mode the programs' schedules start the watering:
+      // the start trigger is for "Calculate only".
       const full = this.config.full_controller === true;
       const lang = this.hass.language;
       const icons: Record<string, string> = {
@@ -708,37 +892,33 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
         html`<div class="settings-section" id="section-${key}">
           <ha-icon icon=${icons[key]}></ha-icon>
           <div>
-            <h2>${localize(`panels.general.sections.${key}`, lang)}</h2>
-            <div class="settings-section-sub">
-              ${localize(`panels.general.sections.${key}-sub`, lang)}
-            </div>
+            <h2>
+              ${localize(`panels.general.sections.${key}`, lang)}<si-info
+                >${localize(
+                  `panels.general.sections.${key}-sub`,
+                  lang,
+                )}</si-info
+              >
+            </h2>
           </div>
         </div>`;
 
       // Three sections, each card in one (#972): what is worked out, what
       // opens the valves, and the panel itself. The weather, its location and
-      // how often it is read are on the Weather tab, with the skip checks.
+      // how often it is read are on the Weather tab, with the skip checks: a
+      // card here said only that, and is gone (the tab is in plain sight).
       // The master switch stays above everything it switches.
-      const r = html`<ha-card
-          header="${localize("panels.general.title", lang)}"
-        >
-          <div class="card-content">
-            ${localize("panels.general.description", lang)}
-          </div>
-          <div class="card-content moved-to-weather">
-            ${localize("panels.general.moved-to-weather", lang)}
-            <a
-              href="/${DOMAIN}/weatherservice"
-              @click=${(e: Event) => {
-                e.preventDefault();
-                navigate(this, `/${DOMAIN}/weatherservice`);
-              }}
-              >${localize("panels.groups.data", lang)}</a
-            >
-          </div> </ha-card
-        >${r18} ${heading("calculation")}${r1}${r8}${r13}${r10}
-        ${heading("control")}${r15}${r9}${full ? "" : r5}
-        ${heading("system")}${r11}${r16}${r12}${r17}`;
+      // The days between irrigation are on the Weather tab's skip page, with
+      // every other check that holds a run back.
+      const r = html`${r18} ${heading("calculation")}${r1}${r13}
+      ${
+        // Observed watering is on the advanced panel, the start triggers are
+        // for "Calculate only": with neither, the heading stood alone.
+        !full || this.config.ui_mode === "advanced"
+          ? html`${heading("control")}${r9}${full ? "" : r5}`
+          : ""
+      }
+      ${heading("system")}${r11}${r12}${r17}`;
 
       return r;
     }
@@ -755,21 +935,19 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
       </ha-card>`;
     }
     if (this.section === "planning") {
-      return html`${this.renderPlanningCard()}`;
+      return html`${this.renderWeekCard()} ${this.renderPlanningCard()}`;
     }
     if (this.section === "supplies") {
       return html`${this.renderSuppliesCard()}`;
     }
-    // The main program, everything of it in one card (how it starts, the order
-    // and pauses of its zones, running it), then the start trigger it uses
-    // when it has no schedule of its own, then the other programs. Its
-    // settings used to come after all the other programs, and nothing showed
-    // which "Run now" belonged to which program (#893).
-    return html`${this.renderProgramsCard("main")} ${triggers}
-    ${this.renderProgramsCard("others")}`;
+    // Every program in one list, each the same way: there is no main program
+    // any more. The start trigger card is for calculating only (one_choice.py).
+    void triggers;
+    return html`${this.renderProgramsCard()}`;
   }
 
-  /** Links to zones of the Zones page, each opening its zone (#969). */
+  /** Links to zones of the Zones page, each opening its zone (#969); the
+   * text may carry the zone's value ("Lawn 3"). */
   private _zoneLinks(zones: { zone_id: number; zone: string }[]) {
     return zones.map(
       (z, index) =>
@@ -785,9 +963,10 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
   }
 
   /** What the programs are doing now, one line each, and the valves that are open. */
-  renderLiveState() {
+  /** What is watering now, or nothing (the card is only shown then). */
+  renderLiveState(): TemplateResult | undefined {
     const state = this.programsState;
-    if (!this.hass || !state) return html``;
+    if (!this.hass || !state) return undefined;
     const lang = this.hass.language;
     const t = (key: string) => localize(`planning.${key}`, lang);
     const live = state.live;
@@ -830,177 +1009,98 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
       ...liveValves(live).map(
         (v: any) => html`
           <div class="setting-note">
-            ${v.zone}: ${left(v.remaining_seconds)} (${v.percent} %)
+            ${v.zone}: ${left(v.remaining_seconds)} (${v.percent}
+            %)${v.passes
+              ? `, ${t("pass_of")
+                  .replace("{pass}", String(v.pass))
+                  .replace("{passes}", String(v.passes))}`
+              : ""}
+          </div>
+        `,
+      ),
+      // Between two passes, and while a pump comes up: nothing is open, and
+      // the run goes on (UX walk of 13 Nov., Q6, Q18).
+      ...(live.soaking || []).map(
+        (v: any) => html`
+          <div class="setting-note">
+            ${v.zone}:
+            ${t("soaking")
+              .replace(
+                "{when}",
+                momentLabel(v.until, lang, {
+                  tomorrow: localize("card.tomorrow", lang),
+                  yesterday: localize("card.yesterday", lang),
+                }),
+              )
+              .replace("{pass}", String(v.next_pass))
+              .replace("{passes}", String(v.passes))}
+          </div>
+        `,
+      ),
+      ...(live.starting || []).map(
+        (v: any) => html`
+          <div class="setting-note">
+            ${v.zone}: ${t("starting").replace("{supply}", v.supply || "")}
           </div>
         `,
       ),
     ];
-    if (!rows.length) {
-      return html`<div class="setting-note">${t("nothing_now")}</div>`;
-    }
+    if (!rows.length) return undefined;
     return html`${rows}`;
   }
 
-  /**
-   * What the programs will water over the next days.
-   *
-   * Only in full controller mode. The weather is not known days ahead: a planned
-   * run is one that goes ahead if nothing holds it back.
-   */
-  renderPlanningCard() {
+  /** The next days at a glance: a row per day, each run a block (week-view.ts). */
+  renderWeekCard() {
     if (!this.config || !this.hass || this.config.full_controller !== true) {
       return html``;
     }
     const lang = this.hass.language;
-    const t = (key: string) => localize(`planning.${key}`, lang);
-    const dayTime = (iso: string) =>
-      new Intl.DateTimeFormat(lang, {
-        weekday: "short",
-        day: "numeric",
-        month: "short",
-        hour: "2-digit",
-        minute: "2-digit",
-      }).format(new Date(iso));
-    const clock = (iso: string) =>
-      new Intl.DateTimeFormat(lang, {
-        hour: "2-digit",
-        minute: "2-digit",
-      }).format(new Date(iso));
-    const tc = (key: string) => localize(`programs.${key}`, lang);
-    const control = (service: string) =>
-      this.hass!.callService(DOMAIN, service, {}).then(() =>
-        this._fetchLive(false),
-      );
-    // Each button only when it can act: they were all live with nothing
-    // watering, and pressing one did nothing that could be seen (#893).
-    const live = this.programsState?.live || {};
-    const paused = live.paused === true;
-    const running =
-      (live.programs || []).some((p: any) => p.state === "running") ||
-      (live.valves || []).length > 0 ||
-      !!live.cycle;
-    const anything = paused || running || (live.programs || []).length > 0;
-    // The durations planned, in the form the rest of the panel uses: it said
-    // "62 min" where Start said "1 h 02 min".
-    const minutes = (seconds: number) => friendlyDuration(seconds);
-    const planning = this.planning || [];
-    return html`
-      <ha-card header="${t("title")}">
-        <div class="card-content">
-          ${t("description")} ${this.renderLiveState()}
-        </div>
-        <div class="card-content">
-          <div class="si-actions">
-            ${this._actionBtn(
-              mdiPause,
-              tc("pause"),
-              () => control("pause_watering"),
-              false,
-              !running || paused,
-            )}
-            ${this._actionBtn(
-              mdiPlay,
-              tc("resume"),
-              () => control("resume_watering"),
-              false,
-              !paused,
-            )}
-            ${this._actionBtn(
-              mdiSkipNext,
-              tc("next_step"),
-              () => control("next_step"),
-              false,
-              !running || paused,
-            )}
-            ${this._actionBtn(
-              mdiStop,
-              tc("stop"),
-              async () => {
-                if (await this._ask(tc("confirm_stop"), true))
-                  control("stop_watering");
-              },
-              true,
-              !anything,
-            )}
-          </div>
-          <div class="setting-hint row-hint">${tc("controls_help")}</div>
-        </div>
+    return html`<ha-card>
+      <h1 class="card-header">
+        <span
+          >${localize("week.title", lang)}<si-info
+            >${localize("week.help", lang)}</si-info
+          ></span
+        >
+      </h1>
+      <div class="card-content">
+        <si-week-view
+          .planning=${this.planning || []}
+          .today=${todayRuns(
+            this._history,
+            this.programsState?.programs || [],
+            new Date(),
+          )}
+          .lang=${lang}
+          .days=${this._weekDays}
+          .programLabel=${(id: string, name: string) =>
+            this._programLabel(id, name)}
+          @days-changed=${(e: CustomEvent) => {
+            this._weekDays = e.detail.days;
+            saveWeekDays(this._weekDays);
+            this._fetchLive(true);
+          }}
+          @open-program=${(e: CustomEvent) => {
+            const id = e.detail.program_id;
+            if (id) this._setOpen(`program:${id}`, true);
+            navigate(this, `/${DOMAIN}/programs`);
+          }}
+        ></si-week-view>
+      </div>
+    </ha-card>`;
+  }
 
-        ${planning.length
-          ? planning.map(
-              (item: any) => html`
-                <div class="card-content">
-                  <div class="setting-note">
-                    <strong>${dayTime(item.start)}</strong>
-                    ${this._programLabel(item.program_id, item.program)}
-                    (${clock(item.start)} - ${clock(item.end)})
-                  </div>
-                  ${item.steps.map(
-                    (step: any, n: number) => html`
-                      <div class="setting-note">
-                        ${n + 1}.
-                        ${step.zones
-                          .map(
-                            (z: any) =>
-                              `${z.zone} ${minutes(z.expected_seconds ?? z.seconds)}`,
-                          )
-                          .join(" + ")}
-                      </div>
-                    `,
-                  )}
-                  ${item.zones_without_valve?.length && !item.nothing_to_water
-                    ? html`<div class="setting-note planning-no-valve">
-                        ${t("no_valve")}
-                        ${this._zoneLinks(item.zones_without_valve)}
-                      </div>`
-                    : ""}
-                  ${item.nothing_to_water
-                    ? html`<div
-                        class="setting-note"
-                        style="opacity: 0.6; font-style: italic;"
-                      >
-                        ${item.zones_without_valve?.length
-                          ? html`${t("nothing_no_valve")}
-                            ${this._zoneLinks(item.zones_without_valve)}`
-                          : t("nothing_to_water")}
-                      </div>`
-                    : item.expected_seconds
-                      ? html`<div class="setting-note">
-                          ${t("expected")} ${minutes(item.expected_seconds)}
-                        </div>`
-                      : ""}
-                  ${item.skipped_reason
-                    ? html`<div
-                        class="setting-note"
-                        style="opacity: 0.6; font-style: italic;"
-                      >
-                        ${item.skipped_reason === "suspended"
-                          ? t("expected_skipped_suspended").replace(
-                              "{when}",
-                              momentLabel(item.suspended_until, lang, {
-                                tomorrow: localize("card.tomorrow", lang),
-                                yesterday: localize("card.yesterday", lang),
-                              }),
-                            )
-                          : t("expected_skipped_precipitation").replace(
-                              "{mm}",
-                              String(
-                                Math.round(
-                                  (item.forecast?.forecast_mm ?? 0) * 10,
-                                ) / 10,
-                              ),
-                            )}
-                      </div>`
-                    : ""}
-                  ${item.tours > 1
-                    ? html`<div class="setting-note">
-                        ${item.tours} ${t("tours")}
-                      </div>`
-                    : ""}
-                </div>
-              `,
-            )
-          : html`<div class="card-content">${t("nothing_planned")}</div>`}
+  /** What is watering now; the runs to come are in the week chart above. */
+  renderPlanningCard() {
+    if (!this.config || !this.hass || this.config.full_controller !== true) {
+      return html``;
+    }
+    const live = this.renderLiveState();
+    if (!live) return html``;
+    const lang = this.hass.language;
+    return html`
+      <ha-card header="${localize("planning.now", lang)}">
+        <div class="card-content">${live}</div>
       </ha-card>
     `;
   }
@@ -1021,37 +1121,120 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
       if (withPlanning) {
         this.planning = await this.hass.callWS({
           type: DOMAIN + "/planning",
-          days: 3,
+          days: Math.max(3, this._weekDays),
         });
-        await this._fetchStartSource();
+        // The flow's "Weather allows it?" answers with what the checks say.
+        if (this.section === "programs") {
+          try {
+            this._skipPreview =
+              (await fetchIrrigationInfo(this.hass))?.skip_preview ?? null;
+          } catch {
+            // The node stays neutral.
+            this._skipPreview = undefined;
+          }
+        }
       }
+      // What watered today, for the week view's first row: read with the
+      // live state while something waters (a zone just done shows at once),
+      // with the planning otherwise.
+      const watering = (this.programsState?.programs || []).some(
+        (p: any) => p.state === "running" || p.state === "paused",
+      );
+      if (
+        this.section === "planning" &&
+        (withPlanning || watering || this._wasWatering)
+      ) {
+        try {
+          this._history =
+            (await fetchIrrigationHistory(this.hass, 100)).records || [];
+        } catch {
+          // Today's row shows only what is planned.
+        }
+      }
+      this._wasWatering = watering;
       this._scheduleUpdate();
     } catch (error) {
       console.error("Error fetching the programs' state:", error);
     }
   }
 
-  /** Whether the start trigger or the main program's schedules start it. */
-  private async _fetchStartSource(): Promise<void> {
-    if (!this.hass || this.config?.full_controller !== true) return;
-    try {
-      const info = await fetchIrrigationInfo(this.hass);
-      this.startSource = info?.start_source ?? "trigger";
-      this._scheduleUpdate();
-    } catch (error) {
-      console.error("Error fetching what starts the main program:", error);
+  /**
+   * What a run of ``program`` would do, from the cache; asked of the backend
+   * when the program changed or the answer is a minute old (the zones'
+   * durations move with the weather).
+   */
+  private _preview(
+    id: string,
+    program: SmartIrrigationProgram,
+  ): ProgramPreview | undefined {
+    const key = JSON.stringify(program);
+    const cached = PREVIEWS[id];
+    const fresh =
+      cached && cached.key === key && Date.now() - cached.at < 60000;
+    if (!fresh && !cached?.pending && this.hass) {
+      PREVIEWS[id] = { ...(cached || {}), key, at: Date.now(), pending: true };
+      // Typing in a field changes the program at each key: a moment's wait.
+      window.setTimeout(async () => {
+        try {
+          const data = await this.hass!.callWS<ProgramPreview>({
+            type: DOMAIN + "/program_preview",
+            program,
+          });
+          PREVIEWS[id] = { key, at: Date.now(), data };
+        } catch (error) {
+          console.error("Error drawing the program:", error);
+          PREVIEWS[id] = { key, at: Date.now(), data: cached?.data };
+        }
+        this._scheduleUpdate();
+      }, 400);
     }
+    return PREVIEWS[id]?.data;
+  }
+
+  /** What the backend makes of the YAML typed for a program. */
+  private _yamlPreview(
+    id: string,
+    value: unknown,
+    replacing?: SmartIrrigationProgram,
+  ): void {
+    const edit = YAML_EDITS[id];
+    if (!edit || !this.hass) return;
+    const program = programFromYaml(value, replacing);
+    if (!program) {
+      edit.preview = undefined;
+      edit.error = localize("programs.yaml_not_a_program", this.hass.language);
+      this._scheduleUpdate();
+      return;
+    }
+    const key = JSON.stringify(program);
+    edit.key = key;
+    window.setTimeout(async () => {
+      if (YAML_EDITS[id] !== edit || edit.key !== key) return;
+      try {
+        const data = await this.hass!.callWS<ProgramPreview>({
+          type: DOMAIN + "/program_preview",
+          program,
+        });
+        if (edit.key !== key) return;
+        edit.preview = data;
+        edit.error = undefined;
+      } catch (error: any) {
+        edit.preview = undefined;
+        edit.error = error?.message ?? String(error);
+      }
+      this._scheduleUpdate();
+    }, 400);
   }
 
   /**
    * Programs: what is watered, in what order, for how long.
    *
-   * Only in full controller mode. The main program is made from the settings
-   * below; only its schedules are edited here (when one is enabled they start it
-   * in place of the start trigger). A step is one or several zones watered
-   * together; by default it takes the duration Smart Irrigation calculated.
+   * Only in full controller mode. Every program is the same kind: its steps,
+   * started on its own by its schedules that are on, or by hand. A step is one
+   * or several zones watered together; by default it takes the duration Smart
+   * Irrigation calculated.
    */
-  renderProgramsCard(part: "main" | "others" = "others") {
+  renderProgramsCard() {
     if (!this.config || !this.hass || this.config.full_controller !== true) {
       return html``;
     }
@@ -1066,13 +1249,14 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
       this._scheduleUpdate();
     };
     const patch = (index: number, changes: Partial<SmartIrrigationProgram>) =>
-      save(programs.map((p, n) => (n === index ? { ...p, ...changes } : p)));
+      // Every key the form does not show (in this mode) is kept.
+      save(programs.map((p, n) => (n === index ? withProgram(p, changes) : p)));
     const num = (v: string, fallback = 0) => {
       const n = parseFloat(v);
       return isNaN(n) ? fallback : n;
     };
     const programName = (program: SmartIrrigationProgram) =>
-      this._programLabel(program.main ? "main" : program.id, program.name);
+      this._programLabel(program.id ?? "", program.name);
     const toast = (message: string) =>
       fireEvent(this, "hass-notification" as any, { message } as any);
     const run = async (program: SmartIrrigationProgram) => {
@@ -1093,7 +1277,7 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
       if (!(await this._ask(question))) return;
       const seconds = Math.round(parseFloat(opts.seconds ?? ""));
       const data: Record<string, unknown> = { program_id: id };
-      if (seconds > 0 && id !== "main") data.seconds = Math.min(seconds, 86400);
+      if (seconds > 0) data.seconds = Math.min(seconds, 86400);
       if (opts.replace) data.mode = "replace";
       try {
         await this.hass!.callService(DOMAIN, "run_program", data);
@@ -1120,39 +1304,44 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
         ).replace("{name}", name),
       );
     };
-    // The main program has no steps to share a total over: it takes no duration.
     // What a manual run can be asked for: kept for the next press only, not
-    // saved, so folded away rather than shown among the saved settings (#893).
+    // saved, so shown only once asked for from the header's button (#893).
+    // Folding it hides it again.
     const runOptions = (id: string | undefined) => html`
-      <details class="more">
+      <details
+        class="more"
+        open
+        @toggle=${(e: Event) => {
+          if ((e.target as HTMLDetailsElement).open) return;
+          this._setOpen(`run_options:${id}`, false);
+          this._scheduleUpdate();
+        }}
+      >
         <summary>${t("run_options")}</summary>
         <div class="more-body">
-          ${id === "main"
-            ? ""
-            : html`<div class="setting-row">
-                  <div class="setting-label">
-                    ${t("run_seconds")}
-                    <span class="unit"
-                      >(${localize("common.units.seconds", lang)})</span
-                    >
-                  </div>
-                  <input
-                    class="field"
-                    type="number"
-                    min="1"
-                    max="86400"
-                    .value=${RUN_OPTIONS[id ?? ""]?.seconds ?? ""}
-                    @input=${(e: Event) => {
-                      const o = (RUN_OPTIONS[id ?? ""] ||= {});
-                      o.seconds = (e.target as HTMLInputElement).value;
-                    }}
-                  />
-                </div>
-                <div class="setting-hint row-hint">
-                  ${t("run_seconds_help")}
-                </div>`}
           <div class="setting-row">
-            <div class="setting-label">${t("run_replace")}</div>
+            <div class="setting-label">
+              ${t("run_seconds")}
+              <span class="unit"
+                >(${localize("common.units.seconds", lang)})</span
+              ><si-info>${t("run_seconds_help")}</si-info>
+            </div>
+            <input
+              class="field"
+              type="number"
+              min="1"
+              max="86400"
+              .value=${RUN_OPTIONS[id ?? ""]?.seconds ?? ""}
+              @input=${(e: Event) => {
+                const o = (RUN_OPTIONS[id ?? ""] ||= {});
+                o.seconds = (e.target as HTMLInputElement).value;
+              }}
+            />
+          </div>
+          <div class="setting-row">
+            <div class="setting-label">
+              ${t("run_replace")}<si-info>${t("run_replace_help")}</si-info>
+            </div>
             <ha-switch
               .checked=${RUN_OPTIONS[id ?? ""]?.replace === true}
               @change=${(e: Event) => {
@@ -1161,7 +1350,6 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
               }}
             ></ha-switch>
           </div>
-          <div class="setting-hint row-hint">${t("run_replace_help")}</div>
         </div>
       </details>
     `;
@@ -1181,10 +1369,10 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
         program_id: program.id,
       }).then(() => this._fetchLive(false));
     };
-    // Starting a program is what the page is opened for most: its button heads
-    // the program, with Stop beside it while it runs, and the options for this
-    // one start folded under them. It stood under every setting.
-    // A program with no zone in its steps has nothing to start yet.
+    // Starting a program is what the page is opened for most: its button is in
+    // the program's header row, with Stop beside it while it runs, Edit in YAML
+    // and the options for this one start; the name and the flow come first in
+    // the body. A program with no zone in its steps has nothing to start yet.
     const suspendedLine = (program: SmartIrrigationProgram) => {
       // Suspended by the suspend action: the card said so, this page did not,
       // and nothing here could lift it (UX walk of 13 Nov., Q3).
@@ -1211,44 +1399,97 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
         </div>
       `;
     };
-    const runHead = (program: SmartIrrigationProgram) => {
-      const runs = ["running", "waiting"].includes(stateOf(program.id)?.state);
-      if (!programCanRun(program) && !runs) return suspendedLine(program);
-      return html`
-        ${suspendedLine(program)}
-        <div class="si-actions plain">
-          ${programCanRun(program)
-            ? this._actionBtn(mdiPlay, t("run_now"), () => run(program))
-            : ""}
-          ${runs
-            ? this._actionBtn(
-                mdiStop,
-                t("stop_program"),
-                () => stopProgram(program),
-                true,
-              )
-            : ""}
-        </div>
-        ${programCanRun(program) ? runOptions(program.id) : ""}
-      `;
+    // Whether the program is under way: running, paused, or queued for its
+    // turn. Stop is offered then only.
+    const isUnderWay = (program: SmartIrrigationProgram) =>
+      ["running", "paused", "waiting"].includes(stateOf(program.id)?.state);
+    // What heads the program's body: its suspension, and the options for the
+    // next run once asked for from the header's button.
+    const runHead = (program: SmartIrrigationProgram) => html`
+      ${suspendedLine(program)}
+      ${programCanRun(program) && this._isOpen(`run_options:${program.id}`)
+        ? runOptions(program.id)
+        : ""}
+    `;
+    // "Running, step 2/3, 12 min left" beside the name: the card said nothing
+    // while its program ran.
+    const stateChip = (program: SmartIrrigationProgram) => {
+      const state = stateOf(program.id);
+      if (!state || !["running", "paused", "waiting"].includes(state.state))
+        return "";
+      const label =
+        state.state === "running"
+          ? t("state_running")
+          : state.state === "paused"
+            ? localize("planning.paused", lang)
+            : t("state_waiting");
+      const bits: string[] = [];
+      const live = state.live || {};
+      if (state.state !== "waiting" && live.steps > 1 && live.step) {
+        bits.push(
+          localize("cards.running.step", lang)
+            .replace("{step}", String(live.step))
+            .replace("{steps}", String(live.steps)),
+        );
+      }
+      if (state.state === "running" && live.remaining_seconds != null) {
+        bits.push(
+          localize("cards.running.program-left", lang).replace(
+            "{time}",
+            friendlyDuration(live.remaining_seconds),
+          ),
+        );
+      }
+      return html`<span class="state-chip ${state.state}">${label}</span
+        >${bits.length
+          ? html` <span class="state-detail">${bits.join(", ")}</span>`
+          : ""}`;
+    };
+    // "50 %, until 21:05": what is in force, said as short as the card says it.
+    // It read "In force: 50 % and 0 s per step, until 13/11/2026, 21:05:14",
+    // and only inside the program (UX walk of 13 Nov., Q14).
+    const adjustmentOf = (program: SmartIrrigationProgram) =>
+      stateOf(program.id)?.adjustment as
+        | { percent?: number; seconds?: number; until?: string | null }
+        | null
+        | undefined;
+    const adjustText = (program: SmartIrrigationProgram) => {
+      const active = adjustmentOf(program);
+      if (!active) return "";
+      const percent = Number(active.percent ?? 100);
+      const seconds = Math.round(Number(active.seconds ?? 0));
+      const what = [
+        percent !== 100 ? `${percent} %` : "",
+        seconds !== 0
+          ? t("adjust_per_step").replace(
+              "{time}",
+              `${seconds > 0 ? "+" : "−"}${friendlyDuration(Math.abs(seconds))}`,
+            )
+          : "",
+      ]
+        .filter(Boolean)
+        .join(", ");
+      return active.until
+        ? t("adjust_short")
+            .replace("{what}", what)
+            .replace(
+              "{when}",
+              momentLabel(active.until, lang, {
+                tomorrow: localize("card.tomorrow", lang),
+                yesterday: localize("card.yesterday", lang),
+              }),
+            )
+        : t("adjust_short_open").replace("{what}", what);
     };
     const adjustBlock = (program: SmartIrrigationProgram) => {
       const id = program.id ?? "";
       const o = (ADJUST_OPTIONS[id] ||= {});
-      const active = stateOf(program.id)?.adjustment as
-        | { percent?: number; seconds?: number; until?: string | null }
-        | null
-        | undefined;
+      const active = adjustmentOf(program);
+      // A program with no step has nothing to adjust: the fields stood in a
+      // new, empty one too.
+      if (!active && !(program.steps || []).length) return html``;
       const summary = active
-        ? t("adjust_active")
-            .replace("{percent}", String(active.percent ?? 100))
-            .replace("{seconds}", String(active.seconds ?? 0))
-            .replace(
-              "{until}",
-              active.until
-                ? new Date(active.until).toLocaleString(lang)
-                : t("adjust_until_reset"),
-            )
+        ? t("adjust_in_force").replace("{what}", adjustText(program))
         : t("adjust_none");
       const field = (
         label: string,
@@ -1279,44 +1520,51 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
       return html`
         <div class="fold-section">${t("adjust_title")}</div>
         <div class="setting-note">${summary}</div>
-        ${field(t("adjust_percent"), "%", "percent", "100")}
-        ${field(
-          t("adjust_seconds"),
-          localize("common.units.seconds", lang),
-          "seconds",
-          "0",
-        )}
-        ${field(t("adjust_hours"), "h", "hours", "")}
-        <div class="setting-hint row-hint">${t("adjust_help")}</div>
-        <div class="si-actions">
-          ${this._actionBtn(mdiPlay, t("adjust_apply"), () => {
-            const data: Record<string, unknown> = {};
-            const percent = parseFloat(o.percent ?? "");
-            const seconds = parseFloat(o.seconds ?? "");
-            const hours = parseFloat(o.hours ?? "");
-            if (!isNaN(percent)) data.percent = percent;
-            if (!isNaN(seconds)) data.seconds = Math.round(seconds);
-            if (!isNaN(hours) && hours >= 1) data.hours = Math.round(hours);
-            if (data.percent === undefined && data.seconds === undefined) {
-              // It did nothing, and said nothing (#893).
-              toast(t("adjust_empty"));
-              return;
-            }
-            call(data);
-          })}
-          ${this._actionBtn(
-            mdiDelete,
-            t("adjust_reset"),
-            async () => {
-              if (!(await this._ask(t("confirm_reset_adjustment"), true)))
-                return;
-              call({ reset: true });
-            },
-            true,
-            // Nothing to reset while no adjustment is in force.
-            !active,
-          )}
-        </div>
+        ${active
+          ? html`<div class="si-actions">
+              ${this._actionBtn(
+                mdiDelete,
+                t("adjust_reset"),
+                async () => {
+                  if (!(await this._ask(t("confirm_reset_adjustment"), true)))
+                    return;
+                  call({ reset: true });
+                },
+                true,
+              )}
+            </div>`
+          : ""}
+        <details class="more">
+          <summary>${t(active ? "adjust_change" : "adjust_set")}</summary>
+          <div class="more-body">
+            ${field(t("adjust_percent"), "%", "percent", "100")}
+            ${field(
+              t("adjust_seconds"),
+              localize("common.units.seconds", lang),
+              "seconds",
+              "0",
+            )}
+            ${field(t("adjust_hours"), "h", "hours", "")}
+            <div class="setting-hint row-hint">${t("adjust_help")}</div>
+            <div class="si-actions">
+              ${this._actionBtn(mdiCheck, t("adjust_apply"), () => {
+                const data: Record<string, unknown> = {};
+                const percent = parseFloat(o.percent ?? "");
+                const seconds = parseFloat(o.seconds ?? "");
+                const hours = parseFloat(o.hours ?? "");
+                if (!isNaN(percent)) data.percent = percent;
+                if (!isNaN(seconds)) data.seconds = Math.round(seconds);
+                if (!isNaN(hours) && hours >= 1) data.hours = Math.round(hours);
+                if (data.percent === undefined && data.seconds === undefined) {
+                  // It did nothing, and said nothing (#893).
+                  toast(t("adjust_empty"));
+                  return;
+                }
+                call(data);
+              })}
+            </div>
+          </div>
+        </details>
       `;
     };
     const control = (service: string) =>
@@ -1345,7 +1593,35 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
         : step.mode === "percent"
           ? `${t("mode_calculated_short")} × ${step.percent} %`
           : t("mode_calculated_short");
+    // The program an "after" schedule follows, by its name.
+    const afterName = (schedule: SmartIrrigationSchedule) => {
+      const found = programs.find(
+        (p) => p.id !== undefined && p.id === schedule.after_program,
+      );
+      return found ? programName(found) : t("after_missing_short");
+    };
     const scheduleText = (schedule: SmartIrrigationSchedule) => {
+      if (schedule.type === "after") {
+        const after = t("summary_after").replace(
+          "{program}",
+          afterName(schedule),
+        );
+        const late = schedule.offset_minutes
+          ? ` +${schedule.offset_minutes} min`
+          : "";
+        // Every day is when the other program runs: only narrowed days say so.
+        const limited =
+          ((schedule.weekdays || []).length > 0 &&
+            (schedule.weekdays || []).length < 7) ||
+          (schedule.every_n_days ?? 1) > 1 ||
+          schedule.parity === "even" ||
+          schedule.parity === "odd" ||
+          (schedule.days_of_month || []).length > 0 ||
+          (schedule.months || []).length > 0 ||
+          !!schedule.from_date ||
+          !!schedule.until_date;
+        return `${after}${late}${limited ? ` · ${t("more_options_set")}` : ""}`;
+      }
       const anchor = schedule.anchor === "end" ? "end" : "start";
       const offset = schedule.offset_minutes
         ? ` ${schedule.offset_minutes > 0 ? "+" : ""}${schedule.offset_minutes} min`
@@ -1353,11 +1629,15 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
       // "starts at sunrise", not "starts at Sunrise": the sun takes its own
       // phrase in each language.
       const moment =
-        schedule.type === "sun"
-          ? `${t(`summary_${anchor}_${schedule.event === "sunset" ? "sunset" : "sunrise"}`)}${offset}`
-          : `${t(anchor === "end" ? "anchor_end_short" : "anchor_start_short")} ${schedule.time}`;
+        schedule.type === "sun" && schedule.event === "azimuth"
+          ? `${t(`summary_${anchor}_azimuth`).replace("{deg}", String(schedule.azimuth ?? 180))}${offset}`
+          : schedule.type === "sun"
+            ? `${t(`summary_${anchor}_${schedule.event === "sunset" ? "sunset" : "sunrise"}`)}${offset}`
+            : `${t(anchor === "end" ? "anchor_end_short" : "anchor_start_short")} ${schedule.time}`;
+      // All seven days are every day.
       const days =
-        (schedule.weekdays || []).length > 0
+        (schedule.weekdays || []).length > 0 &&
+        (schedule.weekdays || []).length < 7
           ? schedule.weekdays.map((d) => weekdayName(d)).join(", ")
           : (schedule.every_n_days ?? 1) > 1
             ? `${t("schedule_every")} ${schedule.every_n_days} ${t("schedule_days")}`
@@ -1377,6 +1657,24 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
         narrowed ? ` · ${t("more_options_set")}` : ""
       }`;
     };
+    // A switch on the right of a fold's summary line (a step's or a
+    // schedule's "on"): clicking it switches, and never opens or closes the
+    // fold. The new value comes from the data, not from the switch, so the
+    // click's default being cancelled cannot leave the two apart.
+    const headSwitch = (on: boolean, set: (on: boolean) => void) => html`
+      <ha-switch
+        .checked=${on}
+        @click=${(e: Event) => {
+          e.stopPropagation();
+          e.preventDefault();
+          set(!on);
+        }}
+      ></ha-switch>
+    `;
+    const headLine = (text: unknown, on: boolean, set: (on: boolean) => void) =>
+      html`<span class="fold-head"
+        ><span class="fold-head-text">${text}</span>${headSwitch(on, set)}</span
+      >`;
     const fold = (key: string, summary: unknown, body: unknown) => html`
       <details
         class="fold"
@@ -1412,6 +1710,395 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
       </details>
     `;
 
+    // Every zone a program can water: the zones of its steps that are on.
+    const programZones = (program: SmartIrrigationProgram) => {
+      const ids = [
+        ...new Set(
+          (program.steps || [])
+            .filter((s) => s.enabled !== false)
+            .flatMap((s) => s.zones || []),
+        ),
+      ];
+      return ids
+        .map((id) => ({
+          id: Number(id),
+          name: this.zones.find((z) => z.id === id)?.name ?? `#${id}`,
+        }))
+        .filter((z) => !isNaN(z.id));
+    };
+    // A run drawn as a flow (objects and arrows, in order) or on a time axis.
+    const drawRun = (program: SmartIrrigationProgram, timeline: any) => {
+      const key = program.id ?? "";
+      const view = RUN_VIEW[key] ?? "flow";
+      const schedules = (program.schedules || []).filter(
+        (s) => s.enabled !== false,
+      );
+      return html`
+        <div class="run-views" role="group">
+          ${(["flow", "timeline"] as const).map(
+            (v) =>
+              html`<button
+                class=${v === view ? "on" : ""}
+                @click=${() => {
+                  RUN_VIEW[key] = v;
+                  this._scheduleUpdate();
+                }}
+              >
+                ${t(`view_${v}`)}
+              </button>`,
+          )}
+        </div>
+        ${view === "flow"
+          ? html`<si-program-flow
+              .flow=${programFlow(
+                timeline,
+                this.zones as any,
+                (this.config?.supplies || []) as any,
+                programZones(program),
+              )}
+              .schedules=${schedules.map((s) => scheduleText(s))}
+              .weather=${weatherVerdict(
+                schedules,
+                this._skipPreview,
+                (this.planning || []).find(
+                  (item: any) => item.program_id === program.id,
+                ),
+              )}
+              .notify=${!!program.notify?.targets?.length}
+              .lang=${lang}
+              @open-zone=${(e: CustomEvent) =>
+                navigate(this, `/${DOMAIN}/zones/zone/${e.detail.zone_id}`)}
+            ></si-program-flow>`
+          : html`<si-program-timeline
+              .timeline=${timeline}
+              .lang=${lang}
+            ></si-program-timeline>`}
+      `;
+    };
+    // What a run of the program would do, drawn: asked of the backend for
+    // the program as it is now, saved or not, and only for one unfolded.
+    const preview = (program: SmartIrrigationProgram, foldKey: string) => {
+      const id = program.id ?? "";
+      if (!this._isOpen(foldKey)) return html``;
+      const data = this._preview(id, program);
+      return html`
+        <div class="fold-section">
+          ${t("preview_title")}<si-info>${t("preview_help")}</si-info>
+        </div>
+        ${data
+          ? drawRun(program, data.timeline)
+          : html`<div class="setting-note">…</div>`}
+      `;
+    };
+    // The program as YAML, in place of the form: what the backend makes of
+    // it is shown before anything is saved (the same cleaning as a save).
+    const yamlOpen = (id: string) => YAML_EDITS[id] !== undefined;
+    const openYaml = async (id: string, initial: unknown) => {
+      await loadHaYamlEditor().catch(() => undefined);
+      YAML_EDITS[id] = { initial, value: initial, valid: true };
+      this._yamlPreview(
+        id,
+        initial,
+        id ? programs.find((p) => p.id === id) : undefined,
+      );
+      this._scheduleUpdate();
+    };
+    const closeYaml = (id: string) => {
+      delete YAML_EDITS[id];
+      this._scheduleUpdate();
+    };
+    const yamlBlock = (id: string, index: number | null) => {
+      const edit = YAML_EDITS[id];
+      const replacing = index === null ? undefined : programs[index];
+      const found = edit.preview;
+      const problems = found
+        ? [
+            ...found.unknown_zone_names.map((name) => `"${name}"`),
+            ...found.unknown_zones.map((zone) => `#${zone}`),
+          ]
+        : [];
+      const notWatered = found?.zones_not_watered || [];
+      // What a save would refuse: programs starting each other in a loop,
+      // or one that waits for a program that is not there.
+      const loop = found?.chain_loop || null;
+      const unknownAfter = found?.unknown_after_programs || [];
+      const apply = () => {
+        if (!found || loop || unknownAfter.length) return;
+        const cleaned = { ...found.program };
+        if (index === null) {
+          // A new program is unfolded on its form, its timeline at the top.
+          this._setOpen(`program:${cleaned.id}`, true);
+          save([...programs, cleaned]);
+        } else {
+          save(programs.map((p, n) => (n === index ? cleaned : p)));
+        }
+        closeYaml(id);
+        toast(t("yaml_applied"));
+      };
+      return html`
+        <div class="fold-section">YAML<si-info>${t("yaml_help")}</si-info></div>
+        <ha-yaml-editor
+          .hass=${this.hass}
+          .defaultValue=${edit.initial}
+          @value-changed=${(e: CustomEvent) => {
+            e.stopPropagation();
+            const { value, isValid } = e.detail || {};
+            edit.value = value;
+            edit.valid = isValid !== false;
+            if (edit.valid) this._yamlPreview(id, value, replacing);
+            this._scheduleUpdate();
+          }}
+        ></ha-yaml-editor>
+        ${!edit.valid
+          ? html`<div class="setting-hint row-hint warning-hint">
+              ${t("yaml_invalid")}
+            </div>`
+          : edit.error
+            ? html`<div class="setting-hint row-hint warning-hint">
+                ${edit.error}
+              </div>`
+            : ""}
+        ${problems.length
+          ? html`<div class="setting-hint row-hint warning-hint">
+              ${t("yaml_unknown_zones").replace("{zones}", problems.join(", "))}
+            </div>`
+          : ""}
+        ${loop
+          ? html`<div class="setting-hint row-hint warning-hint">
+              ${t("yaml_chain_loop").replace("{programs}", loop.join(" → "))}
+            </div>`
+          : ""}
+        ${unknownAfter.length
+          ? html`<div class="setting-hint row-hint warning-hint">
+              ${t("yaml_unknown_after").replace(
+                "{programs}",
+                unknownAfter.map((p) => `"${p}"`).join(", "),
+              )}
+            </div>`
+          : ""}
+        ${notWatered.length
+          ? html`<div class="setting-hint row-hint warning-hint">
+              ${t("yaml_not_watered").replace(
+                "{zones}",
+                notWatered.map((z) => z.zone ?? `#${z.zone_id}`).join(", "),
+              )}
+            </div>`
+          : ""}
+        ${found && edit.valid && !edit.error
+          ? drawRun(found.program as SmartIrrigationProgram, found.timeline)
+          : ""}
+        <div class="si-actions">
+          ${this._actionBtn(
+            mdiCheck,
+            t("yaml_apply"),
+            apply,
+            false,
+            !edit.valid ||
+              !found ||
+              !!edit.error ||
+              !!loop ||
+              unknownAfter.length > 0,
+          )}
+        </div>
+      `;
+    };
+    // The program's actions, as icons in its header row: Run now, Stop while
+    // it is under way, Edit in YAML (Back to the editor in YAML) and the
+    // options for this run. A click on one acts, and neither folds nor
+    // unfolds the program, except to show what it opened.
+    const headActions = (program: SmartIrrigationProgram) => {
+      const id = program.id ?? "";
+      const icon = (path: string, label: string, act: () => void, cls = "") =>
+        html`<ha-icon-button
+          class=${cls}
+          .path=${path}
+          .label=${label}
+          title=${label}
+          @click=${(e: Event) => {
+            e.stopPropagation();
+            e.preventDefault();
+            act();
+          }}
+        ></ha-icon-button>`;
+      const unfold = () => this._setOpen(`program:${id}`, true);
+      const optionsKey = `run_options:${id}`;
+      return html`<span class="head-actions">
+        ${programCanRun(program)
+          ? icon(mdiPlay, t("run_now"), () => run(program))
+          : ""}
+        ${isUnderWay(program)
+          ? icon(
+              mdiStop,
+              t("stop_program"),
+              () => stopProgram(program),
+              "danger",
+            )
+          : ""}
+        ${yamlOpen(id)
+          ? icon(mdiFormSelect, t("yaml_back"), () => closeYaml(id))
+          : icon(mdiCodeBraces, t("yaml_edit"), () => {
+              unfold();
+              openYaml(id, programToYaml(program, this.zones, programs));
+            })}
+        ${programCanRun(program)
+          ? icon(
+              mdiTune,
+              t("run_options"),
+              () => {
+                const open = !this._isOpen(optionsKey);
+                this._setOpen(optionsKey, open);
+                if (open) unfold();
+                this._scheduleUpdate();
+              },
+              this._isOpen(optionsKey) ? "on" : "",
+            )
+          : ""}
+      </span>`;
+    };
+
+    // As Home Assistant's own visual editors do: what the form does not show
+    // is kept as it is, and the program says, once and read-only, which of
+    // those options it uses, with Edit in YAML at hand to change them. The
+    // standard form leaves out the options few need (fields of the advanced
+    // mode); no form has a field for the two YAML-only ones.
+    const hiddenNotice = (program: SmartIrrigationProgram) => {
+      const groups = hiddenOptions(program, this.config?.ui_mode, {
+        t,
+        monthName,
+        days: (count) =>
+          localize("programs.days_count", lang, "{count}", count),
+        num: (value) =>
+          formatNumber(
+            value,
+            Number.isInteger(value) ? 0 : 1,
+            this.hass?.locale,
+            lang,
+          ),
+      });
+      if (!groups.length) return "";
+      const id = program.id ?? "";
+      const advanced = hiddenInAdvanced(groups);
+      return html`<ha-alert
+        alert-type="info"
+        .title=${t(advanced ? "hidden_title" : "yaml_only_title")}
+      >
+        ${advanced
+          ? t("hidden_help").replace("{where}", this._advancedPath(lang))
+          : t("yaml_only_help")}
+        ${groups.map((group) => html`<div>${hiddenLine(group)}</div>`)}
+        <ha-button
+          slot="action"
+          appearance="plain"
+          @click=${() =>
+            openYaml(id, programToYaml(program, this.zones, programs))}
+          >${t("yaml_edit")}</ha-button
+        >
+      </ha-alert>`;
+    };
+
+    // The options few need are fields of the advanced mode only.
+    const advanced = this.config?.ui_mode === "advanced";
+
+    // A schedule's day options of the advanced mode, under its More options:
+    // the shift of "every N days" (programs taking turns), even or odd days,
+    // days of the month and months.
+    const advancedDays = (
+      schedule: SmartIrrigationSchedule,
+      patchSchedule: (changes: Partial<SmartIrrigationSchedule>) => void,
+      toggle: (
+        list: number[] | undefined,
+        value: number,
+        on: boolean,
+      ) => number[],
+    ) => html`
+      ${(schedule.every_n_days ?? 1) > 1 || (schedule.every_offset ?? 0) > 0
+        ? this._numRow(
+            t("schedule_every_offset"),
+            t("schedule_days"),
+            schedule.every_offset ?? 0,
+            (v) =>
+              patchSchedule({
+                every_offset: Math.max(0, Math.round(num(v))),
+              }),
+          )
+        : ""}
+      ${this._selectRow(
+        t("schedule_parity"),
+        html`
+          <option
+            value="any"
+            ?selected=${schedule.parity !== "even" && schedule.parity !== "odd"}
+          >
+            ${t("parity_any")}
+          </option>
+          <option value="even" ?selected=${schedule.parity === "even"}>
+            ${t("parity_even")}
+          </option>
+          <option value="odd" ?selected=${schedule.parity === "odd"}>
+            ${t("parity_odd")}
+          </option>
+        `,
+        (e: Event) =>
+          patchSchedule({
+            parity: (e.target as HTMLSelectElement)
+              .value as SmartIrrigationSchedule["parity"],
+          }),
+      )}
+      ${this._textRow(
+        html`${t("schedule_days_of_month")}<si-info
+            >${t("schedule_days_of_month_help")}</si-info
+          >`,
+        `1, 15, ${t("last_word")}`,
+        (schedule.days_of_month || [])
+          .map((day) => (day === "last" ? t("last_word") : day))
+          .join(", "),
+        (v) =>
+          patchSchedule({
+            days_of_month: v
+              .split(/[,;\s]+/)
+              .map((part) => part.trim().toLowerCase())
+              // The word of the panel's language, or "last" as stored.
+              .map((part) =>
+                part === t("last_word").toLowerCase() ? "last" : part,
+              )
+              .filter(
+                (part) =>
+                  part === "last" ||
+                  (/^\d+$/.test(part) &&
+                    Number(part) >= 1 &&
+                    Number(part) <= 31),
+              )
+              .map((part) => (part === "last" ? part : Number(part))),
+          }),
+      )}
+      <div class="setting-row">
+        <div class="setting-label">
+          ${t("schedule_months")}<si-info>${t("schedule_months_help")}</si-info>
+        </div>
+        <div>
+          ${[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(
+            (month) => html`
+              <label style="margin-right: 10px; white-space: nowrap;">
+                <input
+                  type="checkbox"
+                  .checked=${(schedule.months || []).includes(month + 1)}
+                  @change=${(e: Event) =>
+                    patchSchedule({
+                      months: toggle(
+                        schedule.months,
+                        month + 1,
+                        (e.target as HTMLInputElement).checked,
+                      ),
+                    })}
+                />
+                ${monthName(month)}
+              </label>
+            `,
+          )}
+        </div>
+      </div>
+    `;
+
     const renderStep = (
       program: SmartIrrigationProgram,
       index: number,
@@ -1419,25 +2106,49 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
       stepIndex: number,
     ) => {
       const patchStep = (changes: Partial<SmartIrrigationStep>) =>
-        patch(index, {
-          steps: (program.steps || []).map((s, n) =>
-            n === stepIndex ? { ...s, ...changes } : s,
-          ),
-        });
+        patch(index, withStep(program, stepIndex, changes));
       const toggleZone = (zoneId: number, on: boolean) => {
         const zones = (step.zones || []).filter((z) => z !== zoneId);
         patchStep({ zones: on ? [...zones, zoneId] : zones });
       };
+      // What changes how the step runs is in its head: the passes and its own
+      // wait or overlap. "Step 2 · Hedges · calculated" stood over two passes,
+      // and over a step that starts the next 30 s early (UX walk, Q15).
+      const passes = Math.max(1, Number(step.passes) || 1);
+      const ownDelay =
+        step.delay === null || step.delay === undefined
+          ? null
+          : Number(step.delay);
+      const extras = [
+        passes > 1 ? t("passes_short").replace("{n}", String(passes)) : "",
+        ownDelay !== null && ownDelay < 0
+          ? t("overlap_short").replace(
+              "{time}",
+              friendlyDuration(Math.abs(ownDelay)),
+            )
+          : "",
+        ownDelay !== null && ownDelay > 0
+          ? t("wait_short").replace("{time}", friendlyDuration(ownDelay))
+          : "",
+      ].filter(Boolean);
+      const minOverMax =
+        (step.min_seconds ?? 0) > 0 &&
+        (step.max_seconds ?? 0) > 0 &&
+        (step.min_seconds ?? 0) > (step.max_seconds ?? 0);
       return fold(
         `step:${step.id}`,
-        html`<strong>${t("step")} ${stepIndex + 1}</strong> ·
-          ${zoneNames(step.zones)} ·
-          ${durationText(step)}${step.enabled === false
-            ? html` · <em>${t("off")}</em>`
-            : ""}`,
+        headLine(
+          html`<strong>${t("step")} ${stepIndex + 1}</strong> ·
+            ${zoneNames(step.zones)} ·
+            ${durationText(step)}${extras.map((extra) => html` · ${extra}`)}`,
+          step.enabled !== false,
+          (on) => patchStep({ enabled: on }),
+        ),
         html`
           <div class="setting-row">
-            <div class="setting-label">${t("step_zones")}</div>
+            <div class="setting-label">
+              ${t("step_zones")}<si-info>${t("step_zones_help")}</si-info>
+            </div>
             <div>
               ${(step.zones || [])
                 .filter((id) => !this.zones.some((z) => z.id === id))
@@ -1477,7 +2188,6 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
               )}
             </div>
           </div>
-          <div class="setting-hint row-hint">${t("step_zones_help")}</div>
           ${this._selectRow(
             t("step_duration"),
             html`
@@ -1523,7 +2233,7 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
               )
             : ""}
           ${this._numRow(
-            t("passes"),
+            html`${t("passes")}<si-info>${t("passes_help")}</si-info>`,
             "",
             step.passes,
             (v) => patchStep({ passes: Math.max(1, Math.round(num(v, 1))) }),
@@ -1531,18 +2241,33 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
             false,
             1,
           )}
-          <div class="setting-hint row-hint">${t("passes_help")}</div>
+          ${passes > 1
+            ? html`${this._numRow(
+                html`${localize("observed_watering.soak_label", lang)}<si-info
+                    >${t("soak_shared_help")}</si-info
+                  >`,
+                localize("observed_watering.minutes", lang),
+                this.config?.soak_minutes ?? 15,
+                (v) =>
+                  this.handleConfigChange({
+                    soak_minutes: Math.max(0, parseFloat(v) || 0),
+                  }),
+              )}`
+            : ""}
           ${more(
             `more:step:${step.id}`,
             (step.max_litres ?? 0) > 0 ||
               (step.min_seconds ?? 0) > 0 ||
               (step.max_seconds ?? 0) > 0 ||
-              (step.adjust_seconds ?? 0) !== 0 ||
-              (step.min_deficit_mm ?? 0) > 0 ||
+              (advanced &&
+                ((step.adjust_seconds ?? 0) !== 0 ||
+                  (step.min_deficit_mm ?? 0) > 0)) ||
               (step.delay !== null && step.delay !== undefined),
             html`
               ${this._numRow(
-                t("max_litres"),
+                html`${t("max_litres")}<si-info
+                    >${t("max_litres_help")}</si-info
+                  >`,
                 unit_text(this.config, ZONE_WATER_VOLUME),
                 // Stored in litres, shown and typed in the unit of the panel.
                 +displayVolume(step.max_litres ?? 0, this.config).toFixed(2),
@@ -1554,9 +2279,10 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
                 false,
                 0,
               )}
-              <div class="setting-hint row-hint">${t("max_litres_help")}</div>
               ${this._numRow(
-                t("min_seconds"),
+                html`${t("min_seconds")}<si-info
+                    >${t("step_bounds_help")}</si-info
+                  >`,
                 localize("common.units.seconds", lang),
                 step.min_seconds ?? 0,
                 (v) =>
@@ -1575,50 +2301,58 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
                 false,
                 0,
               )}
-              ${this._numRow(
-                t("adjust_seconds"),
-                localize("common.units.seconds", lang),
-                step.adjust_seconds ?? 0,
-                (v) =>
-                  patchStep({
-                    adjust_seconds: Math.max(
-                      -21600,
-                      Math.min(21600, Math.round(num(v))),
-                    ),
-                  }),
-              )}
-              <div class="setting-hint row-hint">${t("step_bounds_help")}</div>
-              ${this._numRow(
-                t("min_deficit_mm"),
-                "mm",
-                step.min_deficit_mm ?? 0,
-                (v) => patchStep({ min_deficit_mm: Math.max(0, num(v)) }),
-                1,
-                false,
-                0,
-              )}
-              <div class="setting-hint row-hint">
-                ${t("min_deficit_mm_help")}
-              </div>
+              ${minOverMax
+                ? html`<div class="setting-hint row-hint warning-hint">
+                    ${t("min_over_max").replace(
+                      "{max}",
+                      friendlyDuration(step.max_seconds ?? 0),
+                    )}
+                  </div>`
+                : ""}
+              ${
+                // The time added or removed and the deficit a step waits for:
+                // the advanced mode (the standard one lists them, once set,
+                // in the program's notice).
+                advanced
+                  ? html`${this._numRow(
+                      html`${t("adjust_seconds")}<si-info
+                          >${t("step_bounds_help")}</si-info
+                        >`,
+                      localize("common.units.seconds", lang),
+                      step.adjust_seconds ?? 0,
+                      (v) =>
+                        patchStep({
+                          adjust_seconds: Math.max(
+                            -21600,
+                            Math.min(21600, Math.round(num(v))),
+                          ),
+                        }),
+                    )}
+                    ${this._numRow(
+                      html`${t("min_deficit_mm")}<si-info
+                          >${t("min_deficit_mm_help")}</si-info
+                        >`,
+                      "mm",
+                      step.min_deficit_mm ?? 0,
+                      (v) => patchStep({ min_deficit_mm: Math.max(0, num(v)) }),
+                      1,
+                      false,
+                      0,
+                    )}`
+                  : ""
+              }
               ${this._textRow(
-                t("step_delay"),
+                html`${t("step_delay")}<si-info
+                    >${t("step_delay_help")}</si-info
+                  >`,
                 localize("common.units.seconds", lang),
                 step.delay === null || step.delay === undefined
                   ? ""
                   : step.delay,
                 (v) => patchStep({ delay: v.trim() === "" ? null : num(v) }),
               )}
-              <div class="setting-hint row-hint">${t("step_delay_help")}</div>
             `,
           )}
-          <div class="setting-row">
-            <div class="setting-label">${t("enabled")}</div>
-            <ha-switch
-              .checked=${step.enabled !== false}
-              @change=${(e: Event) =>
-                patchStep({ enabled: (e.target as any).checked })}
-            ></ha-switch>
-          </div>
           <div class="si-actions">
             ${this._actionBtn(
               mdiDelete,
@@ -1645,11 +2379,15 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
       scheduleIndex: number,
     ) => {
       const patchSchedule = (changes: Partial<SmartIrrigationSchedule>) =>
-        patch(index, {
-          schedules: (program.schedules || []).map((s, n) =>
-            n === scheduleIndex ? { ...s, ...changes } : s,
-          ),
-        });
+        patch(index, withSchedule(program, scheduleIndex, changes));
+      // The programs this one may start after: not itself, and none that
+      // already waits for it (they would start each other in a loop).
+      const followable = programs.filter(
+        (p) =>
+          p.id !== undefined &&
+          p.id !== program.id &&
+          !wouldLoop(programs, program.id ?? "", p.id),
+      );
       const toggle = (
         list: number[] | undefined,
         value: number,
@@ -1660,10 +2398,12 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
       };
       return fold(
         `schedule:${schedule.id}`,
-        html`<strong>${t("schedule")} ${scheduleIndex + 1}</strong> ·
-          ${scheduleText(schedule)}${schedule.enabled === false
-            ? html` · <em>${t("off")}</em>`
-            : ""}`,
+        headLine(
+          html`<strong>${t("schedule")} ${scheduleIndex + 1}</strong> ·
+            ${scheduleText(schedule)}`,
+          schedule.enabled !== false,
+          (on) => patchSchedule({ enabled: on }),
+        ),
         html`
           ${this._selectRow(
             t("schedule_moment"),
@@ -1685,46 +2425,175 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
               >
                 ${t("moment_sunset")}
               </option>
+              <option
+                value="azimuth"
+                ?selected=${schedule.type === "sun" &&
+                schedule.event === "azimuth"}
+              >
+                ${t("moment_azimuth")}
+              </option>
+              <option
+                value="after"
+                ?selected=${schedule.type === "after"}
+                ?disabled=${!followable.length && schedule.type !== "after"}
+              >
+                ${t("moment_after")}
+              </option>
             `,
             (e: Event) => {
               const value = (e.target as HTMLSelectElement).value;
+              if (value === "after") {
+                // It starts after the other program: never before its end,
+                // and the moment is its start.
+                patchSchedule({
+                  type: "after",
+                  after_program:
+                    schedule.after_program ?? followable[0]?.id ?? null,
+                  anchor: "start",
+                  hard_deadline: false,
+                  offset_minutes: Math.max(0, schedule.offset_minutes || 0),
+                });
+                return;
+              }
               patchSchedule(
                 value === "time"
                   ? { type: "time" }
-                  : { type: "sun", event: value as "sunrise" | "sunset" },
+                  : {
+                      type: "sun",
+                      event: value as "sunrise" | "sunset" | "azimuth",
+                      ...(value === "azimuth"
+                        ? { azimuth: schedule.azimuth ?? 180 }
+                        : {}),
+                    },
               );
             },
           )}
+          ${schedule.type === "after"
+            ? html`${this._selectRow(
+                html`${t("schedule_after_program")}<si-info
+                    >${t("schedule_after_program_help")}</si-info
+                  >`,
+                html`${afterIsMissing(programs, schedule)
+                  ? html`<option value="" selected disabled>
+                      ${t("after_missing_short")}
+                    </option>`
+                  : ""}
+                ${programs
+                  .filter((p) => p.id !== undefined && p.id !== program.id)
+                  .map(
+                    (p) =>
+                      html`<option
+                        value=${p.id!}
+                        ?selected=${p.id === schedule.after_program}
+                        ?disabled=${wouldLoop(
+                          programs,
+                          program.id ?? "",
+                          p.id!,
+                        )}
+                      >
+                        ${programName(p)}${wouldLoop(
+                          programs,
+                          program.id ?? "",
+                          p.id!,
+                        )
+                          ? ` (${t("after_would_loop")})`
+                          : ""}
+                      </option>`,
+                  )}`,
+                (e: Event) =>
+                  patchSchedule({
+                    after_program:
+                      (e.target as HTMLSelectElement).value || null,
+                  }),
+              )}
+              ${afterIsMissing(programs, schedule)
+                ? html`<div class="setting-hint row-hint warning-hint">
+                    ${t("after_missing")}
+                  </div>`
+                : ""}
+              ${this._numRow(
+                html`${t("schedule_after_offset")}<si-info
+                    >${t("schedule_after_offset_help")}</si-info
+                  >`,
+                localize("common.units.minutes", lang),
+                schedule.offset_minutes,
+                (v) =>
+                  patchSchedule({
+                    offset_minutes: Math.max(0, Math.round(num(v))),
+                  }),
+                1,
+                false,
+                0,
+              )}`
+            : ""}
+          ${schedule.type === "sun" && schedule.event === "azimuth"
+            ? html`${this._numRow(
+                html`${t("schedule_azimuth")}<si-info
+                    >${t("schedule_azimuth_help")}</si-info
+                  >`,
+                "°",
+                schedule.azimuth ?? 180,
+                (v) =>
+                  patchSchedule({
+                    azimuth: ((num(v, 180) % 360) + 360) % 360,
+                  }),
+              )}`
+            : ""}
           ${schedule.type === "time"
             ? this._timeRow(t("schedule_time"), schedule.time, (v) =>
                 patchSchedule({ time: v }),
               )
-            : this._numRow(
-                t("schedule_offset"),
-                localize("common.units.minutes", lang),
-                schedule.offset_minutes,
-                (v) => patchSchedule({ offset_minutes: Math.round(num(v)) }),
+            : schedule.type === "sun"
+              ? this._numRow(
+                  t("schedule_offset"),
+                  localize("common.units.minutes", lang),
+                  schedule.offset_minutes,
+                  (v) => patchSchedule({ offset_minutes: Math.round(num(v)) }),
+                )
+              : ""}
+          ${schedule.type === "after"
+            ? // Locked: the program starts after the other one, the end of a
+              // run that has not happened yet cannot be aimed at.
+              html`<div class="setting-row">
+                <div class="setting-label">
+                  ${t("schedule_anchor")}<si-info
+                    >${t("schedule_anchor_after_help")}</si-info
+                  >
+                </div>
+                <div class="select-wrap">
+                  <select class="field" disabled>
+                    <option selected>${t("anchor_start")}</option>
+                  </select>
+                  <svg class="chev" viewBox="0 0 24 24">
+                    <path d=${mdiMenuDown}></path>
+                  </svg>
+                </div>
+              </div>`
+            : this._selectRow(
+                html`${t("schedule_anchor")}<si-info
+                    >${t("schedule_anchor_help")}</si-info
+                  >`,
+                html`
+                  <option value="start" ?selected=${schedule.anchor !== "end"}>
+                    ${t("anchor_start")}
+                  </option>
+                  <option value="end" ?selected=${schedule.anchor === "end"}>
+                    ${t("anchor_end")}
+                  </option>
+                `,
+                (e: Event) =>
+                  patchSchedule({
+                    anchor: (e.target as HTMLSelectElement).value as
+                      | "start"
+                      | "end",
+                  }),
               )}
-          ${this._selectRow(
-            t("schedule_anchor"),
-            html`
-              <option value="start" ?selected=${schedule.anchor !== "end"}>
-                ${t("anchor_start")}
-              </option>
-              <option value="end" ?selected=${schedule.anchor === "end"}>
-                ${t("anchor_end")}
-              </option>
-            `,
-            (e: Event) =>
-              patchSchedule({
-                anchor: (e.target as HTMLSelectElement).value as
-                  | "start"
-                  | "end",
-              }),
-          )}
-          <div class="setting-hint row-hint">${t("schedule_anchor_help")}</div>
           <div class="setting-row">
-            <div class="setting-label">${t("schedule_weekdays")}</div>
+            <div class="setting-label">
+              ${t("schedule_weekdays")}<si-info
+                >${t("schedule_weekdays_help")}</si-info
+              >
+            </div>
             <div>
               ${[0, 1, 2, 3, 4, 5, 6].map(
                 (day) => html`
@@ -1747,33 +2616,84 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
               )}
             </div>
           </div>
-          <div class="setting-hint row-hint">
-            ${t("schedule_weekdays_help")}
-          </div>
           <div class="setting-row">
-            <div class="setting-label">${t("schedule_weather")}</div>
+            <div class="setting-label">
+              ${t("schedule_weather")}<si-info
+                >${t("schedule_weather_help")}
+                ${advanced ? t("conditions_pick") : ""}</si-info
+              >
+            </div>
             <ha-switch
               .checked=${schedule.weather !== false}
               @change=${(e: Event) =>
+                // A list of conditions is kept: on again, it applies again.
                 patchSchedule({ weather: (e.target as any).checked })}
             ></ha-switch>
           </div>
-          <div class="setting-hint row-hint">${t("schedule_weather_help")}</div>
+          ${
+            // Some of the conditions only (a greenhouse ignores the rain): the
+            // advanced mode, under the switch; the standard one lists such a
+            // list, once set, in the program's notice. All of them ticked is
+            // the default, stored as no list.
+            advanced && schedule.weather !== false
+              ? html`<div class="conditions">
+                  ${SKIP_CONDITION_IDS.map((id) => {
+                    const always = id === "postponed";
+                    const active =
+                      schedule.skip_conditions ?? SKIP_CONDITION_IDS;
+                    // Off under Skip watering: nothing to obey or ignore
+                    // here. The schedule's choice is kept for when it is on.
+                    const setting = always
+                      ? t("cond_postponed")
+                      : this._conditionSetting(id);
+                    return html`
+                      <div class=${setting ? "" : "cond-off"}>
+                        <label style="white-space: nowrap;">
+                          <input
+                            type="checkbox"
+                            .checked=${always || active.includes(id)}
+                            ?disabled=${always || !setting}
+                            @change=${(e: Event) => {
+                              const on = (e.target as HTMLInputElement).checked;
+                              const next = SKIP_CONDITION_IDS.filter((c) =>
+                                c === id ? on : active.includes(c),
+                              );
+                              patchSchedule({
+                                skip_conditions:
+                                  next.length === SKIP_CONDITION_IDS.length
+                                    ? undefined
+                                    : next,
+                              });
+                            }}
+                          />
+                          ${t(`condition_${id}`)}
+                        </label>
+                        <span class="cond-setting">
+                          · ${setting || t("cond_off")}
+                        </span>
+                      </div>
+                    `;
+                  })}
+                </div>`
+              : ""
+          }
           ${more(
             `more:schedule:${schedule.id}`,
-            !!schedule.fallback_time ||
-              schedule.hard_deadline === true ||
+            schedule.hard_deadline === true ||
               (schedule.every_n_days ?? 1) > 1 ||
-              schedule.parity === "even" ||
-              schedule.parity === "odd" ||
-              (schedule.days_of_month || []).length > 0 ||
-              (schedule.months || []).length > 0 ||
+              (advanced &&
+                ((schedule.every_offset ?? 0) > 0 ||
+                  schedule.parity === "even" ||
+                  schedule.parity === "odd" ||
+                  (schedule.days_of_month || []).length > 0 ||
+                  (schedule.months || []).length > 0)) ||
               !!schedule.from_date ||
-              !!schedule.until_date ||
-              schedule.skip_conditions !== undefined,
+              !!schedule.until_date,
             html`
               ${this._numRow(
-                t("schedule_every"),
+                html`${t("schedule_every")}<si-info
+                    >${t("schedule_every_help")}</si-info
+                  >`,
                 t("schedule_days"),
                 schedule.every_n_days ?? 1,
                 (v) =>
@@ -1781,100 +2701,7 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
                     every_n_days: Math.max(1, Math.round(num(v, 1))),
                   }),
               )}
-              ${(schedule.every_n_days ?? 1) > 1
-                ? this._numRow(
-                    t("schedule_every_offset"),
-                    t("schedule_days"),
-                    schedule.every_offset ?? 0,
-                    (v) =>
-                      patchSchedule({
-                        every_offset: Math.max(0, Math.round(num(v))),
-                      }),
-                  )
-                : ""}
-              <div class="setting-hint row-hint">
-                ${t("schedule_every_help")}
-              </div>
-              ${this._selectRow(
-                t("schedule_parity"),
-                html`
-                  <option
-                    value="any"
-                    ?selected=${schedule.parity !== "even" &&
-                    schedule.parity !== "odd"}
-                  >
-                    ${t("parity_any")}
-                  </option>
-                  <option value="even" ?selected=${schedule.parity === "even"}>
-                    ${t("parity_even")}
-                  </option>
-                  <option value="odd" ?selected=${schedule.parity === "odd"}>
-                    ${t("parity_odd")}
-                  </option>
-                `,
-                (e: Event) =>
-                  patchSchedule({
-                    parity: (e.target as HTMLSelectElement)
-                      .value as SmartIrrigationSchedule["parity"],
-                  }),
-              )}
-              ${this._textRow(
-                t("schedule_days_of_month"),
-                `1, 15, ${t("last_word")}`,
-                (schedule.days_of_month || [])
-                  .map((day) => (day === "last" ? t("last_word") : day))
-                  .join(", "),
-                (v) =>
-                  patchSchedule({
-                    days_of_month: v
-                      .split(/[,;\s]+/)
-                      .map((part) => part.trim().toLowerCase())
-                      // The word of the panel's language, or "last" as stored.
-                      .map((part) =>
-                        part === t("last_word").toLowerCase() ? "last" : part,
-                      )
-                      .filter(
-                        (part) =>
-                          part === "last" ||
-                          (/^\d+$/.test(part) &&
-                            Number(part) >= 1 &&
-                            Number(part) <= 31),
-                      )
-                      .map((part) => (part === "last" ? part : Number(part))),
-                  }),
-              )}
-              <div class="setting-hint row-hint">
-                ${t("schedule_days_of_month_help")}
-              </div>
-              <div class="setting-row">
-                <div class="setting-label">${t("schedule_months")}</div>
-                <div>
-                  ${[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(
-                    (month) => html`
-                      <label style="margin-right: 10px; white-space: nowrap;">
-                        <input
-                          type="checkbox"
-                          .checked=${(schedule.months || []).includes(
-                            month + 1,
-                          )}
-                          @change=${(e: Event) =>
-                            patchSchedule({
-                              months: toggle(
-                                schedule.months,
-                                month + 1,
-                                (e.target as HTMLInputElement).checked,
-                              ),
-                            })}
-                        />
-                        ${monthName(month)}
-                      </label>
-                    `,
-                  )}
-                </div>
-              </div>
-              <div class="setting-hint row-hint">
-                ${t("schedule_months_help")}
-              </div>
+              ${advanced ? advancedDays(schedule, patchSchedule, toggle) : ""}
               ${this._monthDayRow(
                 t("schedule_from"),
                 schedule.from_date,
@@ -1882,67 +2709,20 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
                 (v) => patchSchedule({ from_date: v }),
               )}
               ${this._monthDayRow(
-                t("schedule_until"),
+                html`${t("schedule_until")}<si-info
+                    >${t("schedule_period_help")}</si-info
+                  >`,
                 schedule.until_date,
                 monthName,
                 (v) => patchSchedule({ until_date: v }),
               )}
-              <div class="setting-hint row-hint">
-                ${t("schedule_period_help")}
-              </div>
-              ${schedule.type === "sun"
-                ? html`
-                    ${this._selectRow(
-                      t("schedule_fallback_time"),
-                      html`
-                        <option value="" ?selected=${!schedule.fallback_time}>
-                          ${t("schedule_fallback_skip")}
-                        </option>
-                        <option
-                          value="previous"
-                          ?selected=${schedule.fallback_time === "previous"}
-                        >
-                          ${t("schedule_fallback_previous")}
-                        </option>
-                        <option
-                          value="at"
-                          ?selected=${!!schedule.fallback_time &&
-                          schedule.fallback_time !== "previous"}
-                        >
-                          ${t("schedule_fallback_at")}
-                        </option>
-                      `,
-                      (e: Event) => {
-                        const choice = (e.target as HTMLSelectElement).value;
-                        const fixed =
-                          schedule.fallback_time &&
-                          schedule.fallback_time !== "previous"
-                            ? schedule.fallback_time
-                            : "06:00";
-                        patchSchedule({
-                          fallback_time:
-                            choice === "at" ? fixed : choice || null,
-                        });
-                      },
-                    )}
-                    ${schedule.fallback_time &&
-                    schedule.fallback_time !== "previous"
-                      ? this._timeRow(
-                          t("schedule_time"),
-                          schedule.fallback_time,
-                          (v) => patchSchedule({ fallback_time: v || null }),
-                        )
-                      : ""}
-                    <div class="setting-hint row-hint">
-                      ${t("schedule_fallback_time_help")}
-                    </div>
-                  `
-                : ""}
-              ${schedule.anchor === "end" && !program.main
+              ${schedule.anchor === "end"
                 ? html`
                     <div class="setting-row">
                       <div class="setting-label">
-                        ${t("schedule_hard_deadline")}
+                        ${t("schedule_hard_deadline")}<si-info
+                          >${t("schedule_hard_deadline_help")}</si-info
+                        >
                       </div>
                       <ha-switch
                         .checked=${schedule.hard_deadline === true}
@@ -1952,77 +2732,10 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
                           })}
                       ></ha-switch>
                     </div>
-                    <div class="setting-hint row-hint">
-                      ${t("schedule_hard_deadline_help")}
-                    </div>
-                  `
-                : ""}
-              ${schedule.weather !== false
-                ? html`
-                    <div class="setting-label" style="margin-top: 8px;">
-                      ${t("schedule_conditions")}
-                    </div>
-                    <div class="setting-hint row-hint">
-                      ${t("schedule_conditions_help")}
-                    </div>
-                    ${SKIP_CONDITION_IDS.every(
-                      (id) => id === "postponed" || !this._conditionSetting(id),
-                    )
-                      ? html`<div class="setting-hint row-hint">
-                          ${t("conditions_none")}
-                        </div>`
-                      : ""}
-                    ${SKIP_CONDITION_IDS.map((id) => {
-                      const always = id === "postponed";
-                      const active =
-                        schedule.skip_conditions ?? SKIP_CONDITION_IDS;
-                      // Off in Settings: nothing to obey or ignore here. The
-                      // schedule's choice is kept for when it is turned on.
-                      const setting = always
-                        ? t("cond_postponed")
-                        : this._conditionSetting(id);
-                      return html`
-                        <div class=${setting ? "" : "cond-off"}>
-                          <label style="white-space: nowrap;">
-                            <input
-                              type="checkbox"
-                              .checked=${always || active.includes(id)}
-                              ?disabled=${always || !setting}
-                              @change=${(e: Event) => {
-                                const on = (e.target as HTMLInputElement)
-                                  .checked;
-                                const next = SKIP_CONDITION_IDS.filter((c) =>
-                                  c === id ? on : active.includes(c),
-                                );
-                                // All of them is the default: stored as no field.
-                                patchSchedule({
-                                  skip_conditions:
-                                    next.length === SKIP_CONDITION_IDS.length
-                                      ? undefined
-                                      : next,
-                                });
-                              }}
-                            />
-                            ${t(`condition_${id}`)}
-                          </label>
-                          <span class="cond-setting">
-                            · ${setting || t("cond_off")}
-                          </span>
-                        </div>
-                      `;
-                    })}
                   `
                 : ""}
             `,
           )}
-          <div class="setting-row">
-            <div class="setting-label">${t("enabled")}</div>
-            <ha-switch
-              .checked=${schedule.enabled !== false}
-              @change=${(e: Event) =>
-                patchSchedule({ enabled: (e.target as any).checked })}
-            ></ha-switch>
-          </div>
           <div class="si-actions">
             ${this._actionBtn(
               mdiDelete,
@@ -2079,73 +2792,155 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
       </div>
     `;
 
-    if (part === "main") {
-      const index = programs.findIndex((p) => p.main);
-      const program = programs[index];
-      if (!program) return html``;
+    // Whom the program tells when it has watered (program_notify.py).
+    const renderNotify = (program: SmartIrrigationProgram, index: number) => {
+      const notify = program.notify ?? {
+        targets: [],
+        when: "finish" as const,
+        start: false,
+      };
+      const choices = notifyTargets(this.hass!);
+      const known = new Set(choices.map((c) => c.id));
+      // A target that has gone stays listed, so it can be unticked.
+      for (const id of notify.targets)
+        if (!known.has(id)) choices.push({ id, name: id });
+      const set = (changes: Partial<typeof notify>) => {
+        const next = { ...notify, ...changes };
+        patch(index, {
+          notify: next.targets.length ? next : undefined,
+        });
+      };
       return html`
-        <ha-card header="${programName(program)}">
-          <div class="card-content">
-            ${runHead(program)}
-            <div class="setting-note">${t("main_description")}</div>
-            <div class="setting-hint row-hint">${t("main_steps_hint")}</div>
-            <div class="setting-row">
-              <div class="setting-label">${t("enabled")}</div>
-              <ha-switch
-                .checked=${program.enabled !== false}
-                @change=${(e: Event) =>
-                  patch(index, { enabled: (e.target as any).checked })}
-              ></ha-switch>
+        <div class="fold-section">
+          ${t("notify_title")}<si-info>${t("notify_help")}</si-info>
+        </div>
+        ${choices.map(
+          (choice) => html`
+            <div>
+              <label>
+                <input
+                  type="checkbox"
+                  .checked=${notify.targets.includes(choice.id)}
+                  @change=${(e: Event) => {
+                    const on = (e.target as HTMLInputElement).checked;
+                    set({
+                      targets: on
+                        ? [...notify.targets, choice.id]
+                        : notify.targets.filter((x) => x !== choice.id),
+                    });
+                  }}
+                />
+                ${choice.id === "persistent_notification"
+                  ? t("notify_persistent")
+                  : choice.name}
+              </label>
             </div>
-            <div class="fold-section">${t("schedules_title")}</div>
-            <div class="setting-hint row-hint">${t("main_schedules_hint")}</div>
-            ${this.startSource === "main_schedules"
-              ? html`<div class="setting-note">
-                  <strong>${t("main_schedules_active")}</strong>
-                </div>`
-              : ""}
-            ${renderSchedules(program, index)}
-            <div class="fold-section">${t("sequencing_title")}</div>
-            <div class="setting-hint row-hint">
-              ${t("main_settings_description")}
-            </div>
-            ${this.renderExecutionSettings(lang, true)}
-          </div>
-        </ha-card>
+          `,
+        )}
+        ${choices.length <= 1
+          ? html`<div class="setting-note">${t("notify_none")}</div>`
+          : ""}
+        ${notify.targets.length
+          ? html`
+              <div class="setting-row">
+                <div class="setting-label">${t("notify_when")}</div>
+                <div class="select-wrap">
+                  <select
+                    class="field"
+                    @change=${(e: Event) => {
+                      // Three choices for two fields: the start is told only
+                      // along with the end.
+                      const value = (e.target as HTMLSelectElement).value;
+                      set(
+                        value === "start_and_finish"
+                          ? { when: "finish", start: true }
+                          : {
+                              when: value as "finish" | "problems",
+                              start: false,
+                            },
+                      );
+                    }}
+                  >
+                    ${(
+                      [
+                        ["start_and_finish", "notify_when_start_and_finish"],
+                        ["finish", "notify_when_finish"],
+                        ["problems", "notify_when_problems"],
+                      ] as const
+                    ).map(
+                      ([value, label]) => html`
+                        <option
+                          value=${value}
+                          ?selected=${value ===
+                          (notify.when === "problems"
+                            ? "problems"
+                            : notify.start
+                              ? "start_and_finish"
+                              : "finish")}
+                        >
+                          ${t(label)}
+                        </option>
+                      `,
+                    )}
+                  </select>
+                  <svg class="chev" viewBox="0 0 24 24">
+                    <path d=${mdiMenuDown}></path>
+                  </svg>
+                </div>
+              </div>
+            `
+          : ""}
       `;
-    }
+    };
 
     return html`
-      <ha-card header="${t("others_title")}">
-        <div class="card-content">${t("description")}</div>
-        ${programs.map((program, index) =>
-          program.main
-            ? ""
-            : html`
-                <div class="card-content">
-                  ${fold(
-                    `program:${program.id}`,
-                    html`<span class="fold-title">${program.name}</span> ·
-                      ${countLabel((program.steps || []).length, {
-                        none: t("steps_none"),
-                        one: t("steps_one"),
-                        many: t("steps_many"),
-                      })}
-                      ·
-                      ${countLabel((program.schedules || []).length, {
-                        none: t("schedules_none"),
-                        one: t("schedules_one"),
-                        many: t("schedules_many"),
-                      })}${program.enabled === false
-                        ? html` · <em>${t("off")}</em>`
-                        : ""}${stateOf(program.id)?.suspended_until
-                        ? html` · <em>${t("suspended")}</em>`
-                        : ""}`,
-                    html`
-                      ${runHead(program)}
+      <ha-card>
+        <h1 class="card-header">
+          <span>${t("title")}<si-info>${t("description")}</si-info></span>
+        </h1>
+        ${programs.length
+          ? ""
+          : html`<div class="card-content">
+              <div class="setting-note">${t("none_yet")}</div>
+            </div>`}
+        ${programs.map(
+          (program, index) => html`
+            <div class="card-content">
+              ${fold(
+                `program:${program.id}`,
+                html`<span class="fold-head"
+                  ><span class="fold-head-text"
+                    ><span class="fold-title">${programName(program)}</span>
+                    ${stateChip(program)} ·
+                    ${countLabel((program.steps || []).length, {
+                      none: t("steps_none"),
+                      one: t("steps_one"),
+                      many: t("steps_many"),
+                    })}
+                    ·
+                    ${countLabel((program.schedules || []).length, {
+                      none: t("schedules_none"),
+                      one: t("schedules_one"),
+                      many: t("schedules_many"),
+                    })}${(program.schedules || []).length &&
+                    !(program.schedules || []).some((s) => s.enabled !== false)
+                      ? html` · <em>${t("no_schedule_on")}</em>`
+                      : ""}${stateOf(program.id)?.suspended_until
+                      ? html` · <em>${t("suspended")}</em>`
+                      : ""}${adjustmentOf(program)
+                      ? html` · <em>${adjustText(program)}</em>`
+                      : ""}</span
+                  >${headActions(program)}</span
+                >`,
+                yamlOpen(program.id ?? "")
+                  ? html`${runHead(program)}
+                    ${yamlBlock(program.id ?? "", index)}`
+                  : html`
+                      ${hiddenNotice(program)} ${runHead(program)}
                       ${this._textRow(t("name"), "", program.name, (v) =>
                         patch(index, { name: v }),
                       )}
+                      ${preview(program, `program:${program.id}`)}
                       <div class="fold-section">${t("steps_title")}</div>
                       ${(program.steps || []).map((step, stepIndex) =>
                         renderStep(program, index, step, stepIndex),
@@ -2175,65 +2970,79 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
                       </div>
                       <div class="fold-section">${t("schedules_title")}</div>
                       ${renderSchedules(program, index)}
-                      ${this._numRow(
-                        t("delay"),
-                        localize("common.units.seconds", lang),
-                        program.delay ?? 0,
-                        (v) => patch(index, { delay: num(v) }),
-                      )}
-                      <div class="setting-hint row-hint">
-                        ${t("delay_help")}
-                      </div>
-                      ${this._numRow(
-                        t("tours"),
-                        "",
-                        program.tours ?? 1,
-                        (v) =>
-                          patch(index, {
-                            tours: Math.max(1, Math.round(num(v, 1))),
-                          }),
-                        1,
-                        false,
-                        1,
-                      )}
-                      <div class="setting-hint row-hint">
-                        ${t("tours_help")}
-                      </div>
-                      <div class="setting-row">
-                        <div class="setting-label">${t("enabled")}</div>
-                        <ha-switch
-                          .checked=${program.enabled !== false}
-                          @change=${(e: Event) =>
-                            patch(index, {
-                              enabled: (e.target as any).checked,
-                            })}
-                        ></ha-switch>
-                      </div>
-                      ${adjustBlock(program)}
-                      <div class="si-actions">
-                        ${this._actionBtn(
-                          mdiDelete,
-                          t("delete"),
-                          async () => {
-                            if (
-                              !(await this._ask(
-                                t("confirm_delete_program").replace(
-                                  "{name}",
-                                  program.name,
-                                ),
-                                true,
-                              ))
+                      ${
+                        // Rounds: the advanced mode (the standard one lists
+                        // them, once set, in the program's notice).
+                        advanced
+                          ? this._numRow(
+                              html`${t("tours")}<si-info
+                                  >${t("tours_help")}</si-info
+                                >`,
+                              "",
+                              program.tours ?? 1,
+                              (v) =>
+                                patch(index, {
+                                  tours: Math.max(1, Math.round(num(v, 1))),
+                                }),
+                              1,
+                              false,
+                              1,
                             )
-                              return;
-                            save(programs.filter((_, n) => n !== index));
-                          },
-                          true,
-                        )}
-                      </div>
+                          : ""
+                      }
+                      ${renderNotify(program, index)} ${adjustBlock(program)}
+                      ${
+                        // The last program cannot be deleted (the backend
+                        // refuses it too): switch its schedules off instead.
+                        // Nor one another program starts after: that
+                        // schedule would wait for nothing.
+                        programs.length > 1 &&
+                        dependentsOf(programs, program.id).length
+                          ? html`<div class="si-actions">
+                              ${this._actionBtn(
+                                mdiDelete,
+                                t("delete"),
+                                () => undefined,
+                                true,
+                                true,
+                              )}<si-info
+                                >${t("delete_blocked_after").replace(
+                                  "{programs}",
+                                  dependentsOf(programs, program.id)
+                                    .map((p) => programName(p))
+                                    .join(", "),
+                                )}</si-info
+                              >
+                            </div>`
+                          : programs.length > 1
+                            ? html`<div class="si-actions">
+                                ${this._actionBtn(
+                                  mdiDelete,
+                                  t("delete"),
+                                  async () => {
+                                    if (
+                                      !(await this._ask(
+                                        t("confirm_delete_program").replace(
+                                          "{name}",
+                                          program.name,
+                                        ),
+                                        true,
+                                      ))
+                                    )
+                                      return;
+                                    save(
+                                      programs.filter((_, n) => n !== index),
+                                    );
+                                  },
+                                  true,
+                                )}
+                              </div>`
+                            : ""
+                      }
                     `,
-                  )}
-                </div>
-              `,
+              )}
+            </div>
+          `,
         )}
         <div class="card-content">
           <div class="si-actions">
@@ -2242,8 +3051,7 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
                 ...programs,
                 {
                   id: this._openNew("program", "program_" + random()),
-                  name: `${t("new_program")} ${programs.length}`,
-                  enabled: true,
+                  name: `${t("new_program")} ${programs.length + 1}`,
                   steps: [],
                   delay: 0,
                   tours: 1,
@@ -2253,6 +3061,39 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
             )}
           </div>
         </div>
+        ${
+          // The order, passes and pause of a one-off run of every zone (the
+          // "Irrigate all zones" button of the hub device, for automations):
+          // no program has them, so they are kept here, folded, for that run
+          // alone. Titled as the settings they are: it read as a button. The
+          // advanced mode only, unless one of them was changed, so that the
+          // way that run waters is never hidden.
+          this.config.ui_mode === "advanced" ||
+          this.config.zone_sequencing === "parallel" ||
+          Number(this.config.watering_passes ?? 1) > 1 ||
+          Number(this.config.pause_between_zones ?? 0) > 0
+            ? html`<div class="card-content">
+                <details
+                  class="more"
+                  ?open=${this._isOpen("all_zones_now")}
+                  @toggle=${(e: Event) =>
+                    this._setOpen(
+                      "all_zones_now",
+                      (e.target as HTMLDetailsElement).open,
+                    )}
+                >
+                  <summary>
+                    ${t("all_zones_button_title")}<si-info
+                      >${t("all_zones_now_help")}</si-info
+                    >
+                  </summary>
+                  <div class="more-body">
+                    ${this.renderExecutionSettings(lang, true)}
+                  </div>
+                </details>
+              </div>`
+            : ""
+        }
       </ha-card>
     `;
   }
@@ -2283,11 +3124,18 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
       return isNaN(n) ? 0 : n;
     };
     return html`
-      <ha-card header="${t("title")}">
-        <div class="card-content">${t("description")}</div>
+      <ha-card>
+        <h1 class="card-header">
+          <span>${t("title")}<si-info>${t("description")}</si-info></span>
+        </h1>
         ${supplies.map(
           (supply, index) => html`
             <div class="card-content">
+              ${this._switchTitle(
+                supply.name || t("title"),
+                supply.enabled !== false,
+                (on) => patch(index, { enabled: on }),
+              )}
               ${this._textRow(t("name"), "", supply.name, (v) =>
                 patch(index, { name: v }),
               )}
@@ -2333,40 +3181,46 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
                 )
               }
               ${this._numRow(
-                t("delay_before"),
+                html`${t("delay_before")}<si-info
+                    >${t("delay_before_help")}</si-info
+                  >`,
                 localize("common.units.seconds", lang),
                 supply.delay_before,
                 (v) => patch(index, { delay_before: seconds(v) }),
               )}
-              <div class="setting-hint row-hint">${t("delay_before_help")}</div>
               ${this._numRow(
-                t("delay_after"),
+                html`${t("delay_after")}<si-info
+                    >${t("delay_after_help")}</si-info
+                  >`,
                 localize("common.units.seconds", lang),
                 supply.delay_after,
                 (v) => patch(index, { delay_after: seconds(v) }),
               )}
-              <div class="setting-hint row-hint">${t("delay_after_help")}</div>
-              ${this._numRow(
-                t("kick_seconds"),
-                localize("common.units.seconds", lang),
-                supply.kick_seconds ?? 0,
-                (v) =>
-                  patch(index, {
-                    kick_seconds: Math.max(0, Math.min(60, Number(v) || 0)),
-                  }),
-                1,
-                false,
-                0,
-              )}
-              <div class="setting-hint row-hint">${t("kick_seconds_help")}</div>
-              <div class="setting-row">
-                <div class="setting-label">${t("enabled")}</div>
-                <ha-switch
-                  .checked=${supply.enabled !== false}
-                  @change=${(e: Event) =>
-                    patch(index, { enabled: (e.target as any).checked })}
-                ></ha-switch>
-              </div>
+              ${
+                // The power cut is for one kind of pump: the advanced panel
+                // only (a supply has no YAML), unless it is set, so that it
+                // never acts out of sight.
+                this.config?.ui_mode === "advanced" ||
+                (supply.kick_seconds ?? 0) > 0
+                  ? this._numRow(
+                      html`${t("kick_seconds")}<si-info
+                          >${t("kick_seconds_help")}</si-info
+                        >`,
+                      localize("common.units.seconds", lang),
+                      supply.kick_seconds ?? 0,
+                      (v) =>
+                        patch(index, {
+                          kick_seconds: Math.max(
+                            0,
+                            Math.min(60, Number(v) || 0),
+                          ),
+                        }),
+                      1,
+                      false,
+                      0,
+                    )
+                  : ""
+              }
               <div class="si-actions">
                 ${this._actionBtn(
                   mdiDelete,
@@ -2464,11 +3318,16 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
         ...data,
       });
     return html`
-      <ha-card header="${t("title")}">
-        <div class="card-content">${t("description")}</div>
+      <ha-card>
+        <h1 class="card-header">
+          <span>${t("title")}<si-info>${t("description")}</si-info></span>
+        </h1>
         ${adjustments.map(
           (a) => html`
             <div class="card-content si-subgroup">
+              ${this._switchTitle(a.name, a.enabled !== false, (on) =>
+                update(a.id, { enabled: on }),
+              )}
               ${this._textRow(t("name"), "", a.name, (v) =>
                 update(a.id, { name: v || a.name }),
               )}
@@ -2514,22 +3373,13 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
                 0.5,
               )}
               ${this._textRow(
-                t("zones"),
+                html`${t("zones")}<si-info>${t("zones_hint")}</si-info>`,
                 "",
                 Array.isArray(a.zones)
                   ? a.zones.join(", ")
                   : (a.zones ?? "all"),
                 (v) => update(a.id, { zones: v.trim() || "all" }),
               )}
-              <div class="setting-hint">${t("zones_hint")}</div>
-              <div class="setting-row">
-                <div class="setting-label">${t("enabled")}</div>
-                <ha-switch
-                  .checked=${a.enabled !== false}
-                  @change=${(e: Event) =>
-                    update(a.id, { enabled: (e.target as any).checked })}
-                ></ha-switch>
-              </div>
               <ha-button
                 @click=${() =>
                   this._seasonalCall({
@@ -2573,11 +3423,16 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
     if (!this.hass) return html``;
     const lang = this.hass.language;
     return html`
-      <ha-card header="${localize("panels.setup.title", lang)}">
-        <div class="card-content">
-          ${localize("panels.general.cards.setup-assistant.description", lang)}
-        </div>
-        <div class="card-actions">
+      <ha-card>
+        <h1 class="card-header header-action">
+          <span
+            >${localize("panels.setup.title", lang)}<si-info
+              >${localize(
+                "panels.general.cards.setup-assistant.description",
+                lang,
+              )}</si-info
+            ></span
+          >
           <ha-button
             @click=${() => {
               window.history.pushState(
@@ -2590,7 +3445,7 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
           >
             ${localize("panels.general.cards.setup-assistant.open", lang)}
           </ha-button>
-        </div>
+        </h1>
       </ha-card>
     `;
   }
@@ -2603,11 +3458,16 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
     if (!this.hass) return html``;
     const lang = this.hass.language;
     return html`
-      <ha-card header="${localize("panels.iu_import.title", lang)}">
-        <div class="card-content">
-          ${localize("panels.general.cards.iu-import.description", lang)}
-        </div>
-        <div class="card-actions">
+      <ha-card>
+        <h1 class="card-header header-action">
+          <span
+            >${localize("panels.iu_import.title", lang)}<si-info
+              >${localize(
+                "panels.general.cards.iu-import.description",
+                lang,
+              )}</si-info
+            ></span
+          >
           <ha-button
             @click=${() => {
               window.history.pushState(
@@ -2620,7 +3480,7 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
           >
             ${localize("panels.general.cards.iu-import.open", lang)}
           </ha-button>
-        </div>
+        </h1>
       </ha-card>
     `;
   }
@@ -2631,18 +3491,20 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
     const triggers = this.config.irrigation_start_triggers || [];
 
     return html`
-      <ha-card
-        header="${localize(
-          "irrigation_start_triggers.title",
-          this.hass.language,
-        )}"
-      >
-        <div class="card-content">
-          ${localize(
-            "irrigation_start_triggers.description",
-            this.hass.language,
-          )}
-        </div>
+      <ha-card>
+        <h1 class="card-header">
+          <span
+            >${localize(
+              "irrigation_start_triggers.title",
+              this.hass.language,
+            )}<si-info
+              >${localize(
+                "irrigation_start_triggers.description",
+                this.hass.language,
+              )}</si-info
+            ></span
+          >
+        </h1>
 
         ${this.config?.full_controller === true
           ? // The full controller starts the watering itself: an automation
@@ -2964,35 +3826,27 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
     if (!this.config || !this.data || !this.hass) return html``;
 
     return html`
-      <ha-card header="${localize("weather_skip.title", this.hass.language)}">
-        <div class="card-content">
-          ${localize("weather_skip.description", this.hass.language)}
-        </div>
+      <ha-card>
+        <h1 class="card-header">
+          <span
+            >${localize("weather_skip.title", this.hass.language)}<si-info
+              >${localize(
+                "weather_skip.description",
+                this.hass.language,
+              )}</si-info
+            ></span
+          >
+        </h1>
         <div class="card-content">
           <div class="setting-row">
             <div class="setting-label">
               ${localize("weather_skip.forecast_label", this.hass.language)}
-              <div class="setting-hint">
+              <si-info>
                 ${localize(
                   "weather_skip.forecast_description",
                   this.hass.language,
                 )}
-              </div>
-              ${this.config.use_weather_service
-                ? ""
-                : html`<div class="setting-hint">
-                    <a
-                      href="/${DOMAIN}/weatherservice"
-                      @click=${(e: Event) => {
-                        e.preventDefault();
-                        navigate(this, `/${DOMAIN}/weatherservice`);
-                      }}
-                      >${localize(
-                        "weather_skip.forecast_set_up_service",
-                        this.hass.language,
-                      )}</a
-                    >
-                  </div>`}
+              </si-info>
             </div>
             <ha-switch
               .checked=${!!(
@@ -3013,7 +3867,7 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
                 })}
             ></ha-switch>
           </div>
-
+          ${this._forecastWithoutService()}
           ${this.config.skip_irrigation_on_precipitation ||
           this.config.forecast_rain_credit
             ? this._numRow(
@@ -3054,10 +3908,7 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
       hint: string,
     ) => html`
       <div class="setting-row">
-        <div class="setting-label">
-          ${label}
-          <div class="setting-hint">${hint}</div>
-        </div>
+        <div class="setting-label">${label}<si-info>${hint}</si-info></div>
         <ha-entity-picker
           class="entity-field"
           .hass=${this.hass}
@@ -3069,13 +3920,31 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
         ></ha-entity-picker>
       </div>
     `;
-    const section = (title: string, description: string, body: unknown) => html`
+    const section = (
+      title: string,
+      description: string,
+      body: unknown,
+      key?: string,
+    ) => html`
       <div class="si-subgroup">
-        <div class="si-subgroup-title">${title}</div>
-        <div class="setting-hint">${description}</div>
+        ${key
+          ? this._switchTitle(
+              html`${title}<si-info>${description}</si-info>`,
+              !!(this.config as any)[key],
+              (on) => this.handleConfigChange({ [key]: on }),
+            )
+          : html`<div class="si-subgroup-title">
+              ${title}<si-info>${description}</si-info>
+            </div>`}
         ${body}
       </div>
     `;
+    const sectionOn = (
+      key: string,
+      title: string,
+      description: string,
+      body: unknown,
+    ) => section(title, description, body, key);
     const threshold = (
       key: string,
       value: number | null | undefined,
@@ -3095,20 +3964,16 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
       );
 
     return html`
-      <ha-card header="${t("title")}">
-        <div class="card-content">${t("description")}</div>
+      <ha-card>
+        <h1 class="card-header">
+          <span>${t("title")}<si-info>${t("description")}</si-info></span>
+        </h1>
         <div class="card-content">
-          ${section(
+          ${sectionOn(
+            "skip_on_rain_sensor",
             t("rain.title"),
             t("rain.description"),
             html`
-              <div class="setting-row">
-                <div class="setting-label">${t("enabled")}</div>
-                ${toggle(
-                  "skip_on_rain_sensor",
-                  this.config.skip_on_rain_sensor,
-                )}
-              </div>
               ${this.config.skip_on_rain_sensor
                 ? html`${entity(
                     "rain_sensor",
@@ -3134,14 +3999,11 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
                 : ""}
             `,
           )}
-          ${section(
+          ${sectionOn(
+            "skip_on_freeze",
             t("freeze.title"),
             t("freeze.description"),
             html`
-              <div class="setting-row">
-                <div class="setting-label">${t("enabled")}</div>
-                ${toggle("skip_on_freeze", this.config.skip_on_freeze)}
-              </div>
               ${this.config.skip_on_freeze
                 ? html`${threshold(
                     "freeze_threshold",
@@ -3165,14 +4027,11 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
                 : ""}
             `,
           )}
-          ${section(
+          ${sectionOn(
+            "skip_on_wind",
             t("wind.title"),
             t("wind.description"),
             html`
-              <div class="setting-row">
-                <div class="setting-label">${t("enabled")}</div>
-                ${toggle("skip_on_wind", this.config.skip_on_wind)}
-              </div>
               ${this.config.skip_on_wind
                 ? html`${threshold(
                     "wind_threshold",
@@ -3201,28 +4060,36 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
     `;
   }
 
-  /** The Weather tab's skip page: the forecast, then what is measured. */
+  /**
+   * The Weather tab's skip page, every check that holds a run back in one
+   * place: the forecast, what is measured, the days between irrigation, and
+   * what the zones set for themselves (edited on the zone, summed up here).
+   */
   renderSkipPage(cards: TemplateResult) {
     if (!this.hass) return html``;
     const lang = this.hass.language;
+    const soil = (this.zones || [])
+      .filter((zone) => !!zone.soil_moisture_sensor)
+      .map((zone) => ({
+        zone_id: zone.id ?? 0,
+        zone: `${zone.name} ${zone.soil_moisture_threshold ?? 50} %`,
+      }));
     return html`
-      <ha-card header="${localize("panels.skip.title", lang)}">
-        <div class="card-content">
-          ${localize("panels.skip.description", lang)}
-        </div>
-      </ha-card>
       ${cards}
       <ha-card>
         <div class="card-content skip-soil">
-          ${localize("panels.skip.soil-moisture", lang)}
-          <a
-            href="/${DOMAIN}/zones"
-            @click=${(e: Event) => {
-              e.preventDefault();
-              navigate(this, `/${DOMAIN}/zones`);
-            }}
-            >${localize("panels.skip.open-zones", lang)}</a
-          >
+          ${soil.length
+            ? html`${localize("panels.skip.soil-zones", lang)}
+              ${this._zoneLinks(soil)}`
+            : html`${localize("panels.skip.soil-moisture", lang)}
+                <a
+                  href="/${DOMAIN}/zones"
+                  @click=${(e: Event) => {
+                    e.preventDefault();
+                    navigate(this, `/${DOMAIN}/zones`);
+                  }}
+                  >${localize("panels.skip.open-zones", lang)}</a
+                >`}
         </div>
       </ha-card>
     `;
@@ -3295,52 +4162,61 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
   renderObservedWateringCard() {
     if (!this.config || !this.data || !this.hass) return html``;
     const lang = this.hass.language;
+    // Observed watering is turned on with "Calculate and water" and left as it
+    // was otherwise: switching it by hand is for the advanced panel.
+    if (this.config.ui_mode !== "advanced") return html``;
 
     return html`
-      <ha-card header="${localize("observed_watering.title", lang)}">
+      <ha-card>
+        ${this._switchHeader(
+          html`${localize("observed_watering.title", lang)}<si-info
+              >${localize("observed_watering.description", lang)}</si-info
+            >`,
+          !!this.config.observed_watering_enabled,
+          (on) => this.handleConfigChange({ observed_watering_enabled: on }),
+        )}
         <div class="card-content">
-          ${localize("observed_watering.description", lang)}
-        </div>
-        <div class="card-content">
-          <div class="setting-row">
-            <div class="setting-label">
-              ${localize("observed_watering.enabled_label", lang)}
-            </div>
-            <ha-switch
-              .checked=${this.config.observed_watering_enabled}
-              @change=${(e: Event) =>
-                this.handleConfigChange({
-                  observed_watering_enabled: (e.target as any).checked,
-                })}
-            ></ha-switch>
-          </div>
-
-          <div class="setting-row">
-            <div class="setting-label">
-              ${localize("observed_watering.direct_control_label", lang)}
-            </div>
-            <ha-switch
-              .checked=${this.config.direct_valve_control_enabled}
-              .disabled=${this.config.full_controller === true}
-              @change=${(e: Event) =>
-                this.handleConfigChange({
-                  direct_valve_control_enabled: (e.target as any).checked,
-                })}
-            ></ha-switch>
-          </div>
-
-          ${this.config.direct_valve_control_enabled
-            ? html`
-                <div class="setting-note">
-                  ${localize(
-                    "observed_watering.direct_control_description",
+          ${this.config.observed_watering_enabled &&
+          this.config.ui_mode === "advanced"
+            ? html`${this._numRow(
+                html`${localize("observed_watering.leak_label", lang)}<si-info
+                    >${localize(
+                      "observed_watering.leak_description",
+                      lang,
+                    )}</si-info
+                  >`,
+                "L",
+                this.config.leak_alert_litres ?? 0,
+                (v) =>
+                  this.handleConfigChange({
+                    leak_alert_litres: Math.min(
+                      1000,
+                      Math.max(0, parseFloat(v) || 0),
+                    ),
+                  }),
+              )}`
+            : ""}
+          ${this.config.full_controller === true
+            ? html`${this._numRow(
+                html`${localize(
+                    "observed_watering.set_aside_label",
                     lang,
-                  )}
-                  ${this.config.full_controller === true
-                    ? localize("observed_watering.direct_control_locked", lang)
-                    : ""}
-                </div>
-              `
+                  )}<si-info
+                    >${localize(
+                      "observed_watering.set_aside_description",
+                      lang,
+                    )}</si-info
+                  >`,
+                "",
+                this.config.set_aside_after ?? 0,
+                (v) =>
+                  this.handleConfigChange({
+                    set_aside_after: Math.min(
+                      10,
+                      Math.max(0, parseInt(v) || 0),
+                    ),
+                  }),
+              )}`
             : ""}
           ${this.config.full_controller === true
             ? ""
@@ -3362,91 +4238,92 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
     const lang = this.hass.language;
     const t = (key: string) =>
       localize(`panels.general.cards.master-switch.${key}`, lang);
-    const on = this.config.irrigation_enabled !== false;
+    // One list for two settings: off stops everything, calculating only
+    // holds the watering and keeps the balances current.
+    // Calculate and water is the full controller; calculate only leaves the
+    // watering to an automation of one's own (one_choice.py).
+    const mode =
+      this.config.irrigation_enabled === false
+        ? "off"
+        : this.config.full_controller === true
+          ? "water"
+          : "calculate";
+    const modes = ["water", "calculate", "off"] as const;
     return html`
       <ha-card class="master-switch" header="${t("title")}">
         <div class="card-content">
           <div class="setting-row">
-            <div class="setting-label">${t("label")}</div>
-            <ha-switch
-              .checked=${on}
-              @change=${async (e: Event) => {
-                const target = e.target as any;
-                const enable = target.checked === true;
-                if (!enable && !(await this._ask(t("confirm-off")))) {
-                  target.checked = true;
-                  return;
-                }
-                this.handleConfigChange({ irrigation_enabled: enable })
-                  .then(() => this._fetchData())
-                  .catch(() => undefined);
-              }}
-            ></ha-switch>
-          </div>
-          <div class="setting-note">
-            ${on ? t("description") : t("off-note")}
-          </div>
-        </div>
-      </ha-card>
-    `;
-  }
-
-  renderFullControllerCard(): TemplateResult {
-    if (!this.config || !this.hass) return html``;
-    const lang = this.hass.language;
-    return html`
-      <ha-card
-        header="${localize("observed_watering.full_controller_title", lang)}"
-      >
-        <div class="card-content">
-          <div class="setting-row">
             <div class="setting-label">
-              ${localize("observed_watering.full_controller_label", lang)}
+              ${t("mode")}<si-info
+                >${mode === "off"
+                  ? t("off-note")
+                  : mode === "calculate"
+                    ? t("calculate-note")
+                    : t("water-note")}</si-info
+              >
             </div>
-            <ha-switch
-              .checked=${this.config.full_controller === true}
-              @change=${async (e: Event) => {
-                const target = e.target as any;
-                const on = target.checked === true;
-                if (
-                  on &&
-                  !(await this._ask(
-                    localize("observed_watering.confirm_full_controller", lang),
-                  ))
-                ) {
-                  target.checked = false;
-                  return;
-                }
-                // The main program the backend creates comes back with a
-                // reload, once the save is done rather than after a guessed
-                // delay.
-                this.handleConfigChange({
-                  full_controller: on,
-                  // Switching it on drives the valves, which the backend
-                  // turns on too; mirrored here since our own save is not
-                  // echoed back.
-                  ...(on ? { direct_valve_control_enabled: true } : {}),
-                })
-                  .then(() => this._fetchData())
-                  .catch(() => undefined);
-              }}
-            ></ha-switch>
-          </div>
-          <div class="setting-note">
-            ${localize("observed_watering.full_controller_description", lang)}
+            <div class="select-wrap">
+              <select
+                class="field"
+                @change=${async (e: Event) => {
+                  const target = e.target as HTMLSelectElement;
+                  const next = target.value as (typeof modes)[number];
+                  const ask =
+                    next === "off"
+                      ? t("confirm-off")
+                      : next === "calculate" && mode === "water"
+                        ? t("confirm-calculate")
+                        : next === "water" && mode !== "water"
+                          ? localize(
+                              "observed_watering.confirm_full_controller",
+                              lang,
+                            )
+                          : null;
+                  if (ask && !(await this._ask(ask))) {
+                    target.value = mode;
+                    return;
+                  }
+                  this.handleConfigChange(
+                    next === "off"
+                      ? { irrigation_enabled: false }
+                      : next === "water"
+                        ? {
+                            irrigation_enabled: true,
+                            watering_enabled: true,
+                            full_controller: true,
+                            // What is watered outside the programs counts too.
+                            ...(mode === "water"
+                              ? {}
+                              : { observed_watering_enabled: true }),
+                          }
+                        : {
+                            irrigation_enabled: true,
+                            watering_enabled: true,
+                            full_controller: false,
+                            direct_valve_control_enabled: false,
+                          },
+                  )
+                    .then(() => this._fetchData())
+                    .catch(() => undefined);
+                }}
+              >
+                ${modes.map(
+                  (value) =>
+                    html`<option value=${value} ?selected=${value === mode}>
+                      ${t(`mode-${value}`)}
+                    </option>`,
+                )}
+              </select>
+              <svg class="chev" viewBox="0 0 24 24">
+                <path d=${mdiMenuDown}></path>
+              </svg>
+            </div>
           </div>
         </div>
       </ha-card>
     `;
   }
 
-  /**
-   * The sequencing, the pause between zones and cycle and soak.
-   *
-   * In full controller mode they are the main program's and are shown in the
-   * Watering tab, cycle and soak included whatever the panel mode: whoever
-   * turned the controller on is past the simple panel.
-   */
   renderExecutionSettings(lang: string, full: boolean): TemplateResult {
     if (!this.config) return html``;
     return html`
@@ -3455,7 +4332,14 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
                the valves or an automation of your own does. -->
       <div class="setting-row">
         <div class="setting-label">
-          ${localize("observed_watering.sequencing_label", lang)}
+          ${localize("observed_watering.sequencing_label", lang)}${full
+            ? ""
+            : html`<si-info
+                >${localize(
+                  "observed_watering.sequencing_description",
+                  lang,
+                )}</si-info
+              >`}
         </div>
         <div class="select-wrap">
           <select
@@ -3483,10 +4367,6 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
           </svg>
         </div>
       </div>
-      <div class="setting-note">
-        ${localize("observed_watering.sequencing_description", lang)}
-      </div>
-
       ${this.config.direct_valve_control_enabled &&
       (full || this.config.ui_mode === "advanced")
         ? this.renderCycleAndSoak(lang)
@@ -3506,10 +4386,17 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
     if (!this.config) return html``;
     const config = this.config;
     const passes = Number(config.watering_passes ?? 1) || 1;
+    // The soak is one setting for every program: shown here too when a step of
+    // a program waters in passes, not only for this run in passes (Q5).
+    const stepsInPasses = (config.programs || []).some((program: any) =>
+      (program.steps || []).some((step: any) => Number(step.passes) > 1),
+    );
     const sequential = config.zone_sequencing !== "parallel";
     return html`
       ${this._numRow(
-        localize("observed_watering.passes_label", lang),
+        html`${localize("observed_watering.passes_label", lang)}<si-info
+            >${localize("observed_watering.passes_description", lang)}</si-info
+          >`,
         "",
         passes,
         (v) =>
@@ -3517,38 +4404,35 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
             watering_passes: Math.min(6, Math.max(1, parseInt(v) || 1)),
           }),
       )}
-      ${passes > 1
+      ${passes > 1 || stepsInPasses
         ? html`${this._numRow(
-              localize("observed_watering.soak_label", lang),
-              localize("observed_watering.minutes", lang),
-              config.soak_minutes ?? 15,
-              (v) =>
-                this.handleConfigChange({
-                  soak_minutes: Math.max(0, parseFloat(v) || 0),
-                }),
-            )}
-            <div class="card-content">
-              ${localize("observed_watering.passes_description", lang)}
-            </div>`
-        : html`<div class="card-content">
-            ${localize("observed_watering.passes_description", lang)}
-          </div>`}
+            localize("observed_watering.soak_label", lang),
+            localize("observed_watering.minutes", lang),
+            config.soak_minutes ?? 15,
+            (v) =>
+              this.handleConfigChange({
+                soak_minutes: Math.max(0, parseFloat(v) || 0),
+              }),
+          )}`
+        : ""}
       ${sequential
         ? html`${this._numRow(
-              localize("observed_watering.pause_between_zones_label", lang),
-              localize("observed_watering.seconds", lang),
-              config.pause_between_zones ?? 0,
-              (v) =>
-                this.handleConfigChange({
-                  pause_between_zones: Math.max(0, parseFloat(v) || 0),
-                }),
-            )}
-            <div class="card-content">
-              ${localize(
-                "observed_watering.pause_between_zones_description",
+            html`${localize(
+                "observed_watering.pause_between_zones_label",
                 lang,
-              )}
-            </div>`
+              )}<si-info
+                >${localize(
+                  "observed_watering.pause_between_zones_description",
+                  lang,
+                )}</si-info
+              >`,
+            localize("observed_watering.seconds", lang),
+            config.pause_between_zones ?? 0,
+            (v) =>
+              this.handleConfigChange({
+                pause_between_zones: Math.max(0, parseFloat(v) || 0),
+              }),
+          )}`
         : ""}
     `;
   }
@@ -3561,29 +4445,30 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
    * sound defaults, and meeting them by accident is how a working
    * installation gets broken, so the standard panel leaves them out. Nothing
    * is lost by switching: the values are kept either way.
+   *
+   * One card of two rows with whether Smart Irrigation lays its example
+   * blueprints down (#930, #1056). The System heading above names it, so it
+   * has no title of its own.
    */
   renderPanelModeCard() {
     if (!this.hass || !this.config) return html``;
+    const lang = this.hass.language;
     const advanced = this.config.ui_mode === "advanced";
-    return html`<ha-card
-      header="${localize(
-        "panels.general.cards.panel-mode.header",
-        this.hass.language,
-      )}"
-    >
+    // On out of the box: the advanced mode only, unless it was turned off.
+    const blueprints = advanced || this.config.install_blueprints === false;
+    return html`<ha-card>
       <div class="card-content">
         <div class="setting-row">
           <div class="setting-label">
             ${localize(
               "panels.general.cards.panel-mode.labels.advanced",
-              this.hass.language,
-            )}
-            <div class="setting-hint">
-              ${localize(
+              lang,
+            )}<si-info
+              >${localize(
                 "panels.general.cards.panel-mode.labels.advanced-hint",
-                this.hass.language,
-              )}
-            </div>
+                lang,
+              )}</si-info
+            >
           </div>
           <ha-switch
             .checked=${advanced}
@@ -3593,70 +4478,55 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
               })}
           ></ha-switch>
         </div>
+        ${blueprints
+          ? html`<div class="setting-row">
+              <div class="setting-label">
+                ${localize("blueprints.title", lang)}<si-info
+                  >${localize("blueprints.install_label", lang)}.
+                  ${localize("blueprints.install_help", lang)}</si-info
+                >
+              </div>
+              <ha-switch
+                .checked=${this.config.install_blueprints !== false}
+                @change=${(e: Event) =>
+                  this.handleConfigChange({
+                    install_blueprints: (e.target as any).checked,
+                  })}
+              ></ha-switch>
+            </div>`
+          : ""}
       </div>
     </ha-card>`;
   }
 
-  /** Whether Smart Irrigation lays its example blueprints down (#930). */
-  renderBlueprintsCard() {
-    if (!this.config || !this.hass) return html``;
-    const lang = this.hass.language;
-    return html`
-      <ha-card header="${localize("blueprints.title", lang)}">
-        <div class="card-content">
-          <div class="setting-row">
-            <div class="setting-label">
-              ${localize("blueprints.install_label", lang)}
-            </div>
-            <ha-switch
-              .checked=${this.config.install_blueprints !== false}
-              @change=${(e: Event) =>
-                this.handleConfigChange({
-                  install_blueprints: (e.target as any).checked,
-                })}
-            ></ha-switch>
-          </div>
-          <div class="setting-help">
-            ${localize("blueprints.install_help", lang)}
-          </div>
-        </div>
-      </ha-card>
-    `;
+  /** A card's title with the switch that turns it on: no "Enabled" row. */
+  private _switchHeader(
+    title: unknown,
+    checked: boolean,
+    onChange: (checked: boolean) => void,
+  ): TemplateResult {
+    return html`<h1 class="card-header si-head">
+      <span>${title}</span>
+      <ha-switch
+        .checked=${checked}
+        @change=${(e: Event) => onChange((e.target as any).checked)}
+      ></ha-switch>
+    </h1>`;
   }
 
-  renderCalculationLogCard() {
-    if (!this.config || !this.data || !this.hass) return html``;
-    const lang = this.hass.language;
-
-    return html`
-      <ha-card header="${localize("calculation_log.title", lang)}">
-        <div class="card-content">
-          ${localize("calculation_log.description", lang)}
-        </div>
-        <div class="card-content">
-          <div class="setting-row">
-            <div class="setting-label">
-              ${localize("calculation_log.enabled_label", lang)}
-            </div>
-            <ha-switch
-              .checked=${this.config.calc_log_enabled}
-              @change=${(e: Event) =>
-                this.handleConfigChange({
-                  calc_log_enabled: (e.target as any).checked,
-                })}
-            ></ha-switch>
-          </div>
-          ${this.config.calc_log_enabled
-            ? html`<div
-                class="zoneline"
-                style="color: var(--secondary-text-color); font-style: italic;"
-              >
-                ${localize("calculation_log.file_hint", lang)}
-              </div>`
-            : ""}
-        </div>
-      </ha-card>
-    `;
+  /** The same, for a part of a card. */
+  private _switchTitle(
+    title: unknown,
+    checked: boolean,
+    onChange: (checked: boolean) => void,
+  ): TemplateResult {
+    return html`<div class="si-subgroup-title si-head">
+      <span>${title}</span>
+      <ha-switch
+        .checked=${checked}
+        @change=${(e: Event) => onChange((e.target as any).checked)}
+      ></ha-switch>
+    </div>`;
   }
 
   renderCoordinateCard() {
@@ -3669,12 +4539,8 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
     const haElevation = haCoords?.elevation || 0;
 
     return html`
-      <ha-card
-        header="${localize("coordinate_config.title", this.hass.language)}"
-      >
-        <div class="card-content">
-          ${localize("coordinate_config.description", this.hass.language)}
-        </div>
+      <ha-card>
+        <h1 class="card-header"><span>${localize("coordinate_config.title", this.hass.language)}<si-info>${localize("coordinate_config.description", this.hass.language)}</si-info></span></h1>
         <div class="card-content">
           <div class="setting-row">
             <div class="setting-label">
@@ -3771,17 +4637,29 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
 
   renderDaysBetweenIrrigationCard() {
     if (!this.config || !this.data || !this.hass) return html``;
+    // The zones that count days of their own (0 included: no limit for them).
+    const own = (this.zones || [])
+      .filter((zone) => typeof zone.days_between_irrigation === "number")
+      .map((zone) => ({
+        zone_id: zone.id ?? 0,
+        zone: `${zone.name} ${zone.days_between_irrigation}`,
+      }));
 
     return html`
-      <ha-card
-        header="${localize(
-          "days_between_irrigation.title",
-          this.hass.language,
-        )}"
-      >
-        <div class="card-content">
-          ${localize("days_between_irrigation.description", this.hass.language)}
-        </div>
+      <ha-card>
+        <h1 class="card-header">
+          <span
+            >${localize(
+              "days_between_irrigation.title",
+              this.hass.language,
+            )}<si-info
+              >${localize(
+                "days_between_irrigation.description",
+                this.hass.language,
+              )}</si-info
+            ></span
+          >
+        </h1>
 
         <div class="card-content">
           ${this._numRow(
@@ -3794,6 +4672,13 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
               }),
             1,
           )}
+          ${own.length
+            ? // Set on the zone, shown here so that none acts out of sight.
+              html`<div class="setting-hint row-hint skip-soil">
+                ${localize("days_between_irrigation.own", this.hass.language)}
+                ${this._zoneLinks(own)}
+              </div>`
+            : ""}
         </div>
       </ha-card>
     `;
@@ -3829,11 +4714,6 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
       this._scheduleUpdate();
 
       await saveConfig(this.hass, this.data);
-      // Adding, switching or removing a schedule of the main program changes
-      // what starts it: read that again rather than wait for the next refresh.
-      if ("programs" in changes) {
-        this._fetchStartSource();
-      }
     } catch (error) {
       // Save failed: no _config_updated echo will arrive, so clear the guard
       // (otherwise it would swallow the next genuine external refresh).
@@ -3872,7 +4752,7 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
 
   // --- modern row helpers (HA-native controls) ---
   private _textRow(
-    label: string,
+    label: string | TemplateResult,
     unit: string | TemplateResult,
     value: any,
     onCommit: (v: string) => void,
@@ -3896,7 +4776,7 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
   // Time picker. ha-time-input isn't reliably registered on this panel, so we
   // use the native <input type="time"> (real HH:MM picker, same stored format).
   private _timeRow(
-    label: string,
+    label: string | TemplateResult,
     value: any,
     onCommit: (v: string) => void,
     hint = "",
@@ -3904,7 +4784,7 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
     return html`
       <div class="setting-row">
         <div class="setting-label">
-          ${label}${hint ? html`<div class="setting-hint">${hint}</div>` : ""}
+          ${label}${hint ? html`<si-info>${hint}</si-info>` : ""}
         </div>
         <input
           class="field"
@@ -3918,8 +4798,8 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
   }
 
   /**
-   * What a skip condition is set to in Settings, General, in words, or "" when
-   * it is off there. Thresholds are stored metric and shown in the units of
+   * What a skip condition is set to under Skip watering, in words, or ""
+   * when it is off there. Thresholds are stored metric and shown in the units of
    * Home Assistant, as the Info page shows them.
    */
   private _conditionSetting(id: string): string {
@@ -3964,8 +4844,21 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
         );
       }
       case "days_between": {
-        const days = config.days_between_irrigation ?? 0;
-        return days > 0 ? t("cond_days_between", "{n}", String(days)) : "";
+        // A zone's own days count as much as the general ones: the condition
+        // holds those zones back even when the general setting is 0.
+        const general = config.days_between_irrigation ?? 0;
+        const own = (this.zones || [])
+          .map((zone: any) => zone.days_between_irrigation)
+          .filter((d: any) => typeof d === "number" && d > 0);
+        const all = general > 0 ? [general, ...own] : own;
+        if (!all.length) return "";
+        const low = Math.min(...all);
+        const high = Math.max(...all);
+        return t(
+          "cond_days_between",
+          "{n}",
+          low === high ? String(low) : `${low}-${high}`,
+        );
       }
       case "soil_moisture": {
         const count = (this.zones || []).filter(
@@ -3981,11 +4874,20 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
     }
   }
 
+  /** Where the advanced mode is turned on: "Settings › General › Advanced settings". */
+  private _advancedPath(lang: string): string {
+    return [
+      localize("panels.groups.settings", lang),
+      localize("panels.general.title", lang),
+      localize("panels.general.cards.panel-mode.labels.advanced", lang),
+    ].join(" › ");
+  }
+
   // A day of the year, stored "MM-DD", picked as a month and a day instead of
   // typed. No month: none (the whole year). A day past the end of the month
   // picked is brought back to its last day; 29 February is a real day.
   private _monthDayRow(
-    label: string,
+    label: string | TemplateResult,
     value: string | null | undefined,
     monthName: (i: number) => string,
     onCommit: (v: string | null) => void,
@@ -4048,8 +4950,40 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
     `;
   }
 
+  /**
+   * Without a weather service there is no forecast. In sight, not behind a
+   * second "i": switched on (kept from before), it holds nothing back.
+   */
+  private _forecastWithoutService() {
+    if (!this.hass || !this.config || this.config.use_weather_service)
+      return "";
+    const on = !!(
+      this.config.skip_irrigation_on_precipitation ||
+      this.config.forecast_rain_credit
+    );
+    return html`<div class="setting-hint row-hint ${on ? "warning-hint" : ""}">
+      ${localize(
+        on
+          ? "weather_skip.forecast_no_service_on"
+          : "weather_skip.forecast_no_service",
+        this.hass.language,
+      )}
+      <a
+        href="/${DOMAIN}/weatherservice"
+        @click=${(e: Event) => {
+          e.preventDefault();
+          navigate(this, `/${DOMAIN}/weatherservice`);
+        }}
+        >${localize(
+          "weather_skip.forecast_set_up_service",
+          this.hass.language,
+        )}</a
+      >
+    </div>`;
+  }
+
   private _numRow(
-    label: string,
+    label: string | TemplateResult,
     unit: string | TemplateResult,
     value: any,
     onCommit: (v: string) => void,
@@ -4149,15 +5083,8 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
 
   // Action button: native ha-button, light "filled" appearance,
   // "danger" variant turns it red.
-  /**
-   * A program's name as shown: the main program's stored English default in
-   * the user's language. The planning and the live state showed "Main
-   * program" in a French panel.
-   */
   private _programLabel(id: string | undefined, name: string | undefined) {
-    return id === "main" && (!name || name === "Main program")
-      ? localize("programs.main_name", this.hass?.language ?? "en")
-      : (name ?? id ?? "");
+    return name || id || "";
   }
 
   /** Asks in a Home Assistant dialog; true to go ahead. */
@@ -4209,23 +5136,77 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
         margin-top: 16px;
       }
 
+      .run-views {
+        display: inline-flex;
+        border: 1px solid var(--divider-color);
+        border-radius: 16px;
+        overflow: hidden;
+        margin: 4px 0 8px;
+      }
+      .run-views button {
+        border: 0;
+        background: none;
+        color: var(--primary-text-color);
+        font: inherit;
+        font-size: 0.85em;
+        padding: 4px 12px;
+        cursor: pointer;
+      }
+      .run-views button.on {
+        background: var(--primary-color);
+        color: var(--text-primary-color, #fff);
+      }
       .settings-section {
         display: flex;
         align-items: flex-start;
         gap: 12px;
-        margin: 32px 4px 8px;
-        padding-top: 16px;
+        /* The cards' 5 px margin and 16 px padding: the icon starts where
+           their content does (#1050), the line spans the cards' width. */
+        margin: 32px 5px 8px;
+        padding: 16px 16px 0;
         border-top: 1px solid var(--divider-color);
       }
+      /* The icon on the title's middle (#1056): both on one 28 px line,
+         the icon centred in it. It hung 2 px under the line's top, and the
+         heading's line was taller than the icon, so it sat low. */
       .settings-section ha-icon {
         color: var(--primary-color);
-        margin-top: 2px;
+        display: flex;
+        align-items: center;
+        height: 28px;
       }
       .settings-section h2 {
         margin: 0;
         font-size: 1.3em;
+        line-height: 28px;
         font-weight: 500;
         color: var(--primary-text-color);
+      }
+      /* A card that is only a way somewhere (the setup assistant, the
+         Irrigation Unlimited import): the button on the title's line, not on
+         a row of its own under a divider (#1056). */
+      .card-header.header-action {
+        align-items: center;
+        gap: 12px;
+        padding-bottom: 12px;
+      }
+      .card-header.header-action > span {
+        flex: 1 1 auto;
+        min-width: 0;
+        overflow-wrap: anywhere;
+        line-height: 1.3;
+      }
+      /* A button's own size, not the title's 24 px. */
+      .card-header.header-action > ha-button {
+        flex: 0 0 auto;
+        font-size: var(--ha-font-size-m, 14px);
+        letter-spacing: normal;
+        line-height: normal;
+      }
+      /* A seasonal adjustment: its own padding, since .si-subgroup sets the
+         card content's to 0 on the sides. */
+      .card-content.si-subgroup {
+        padding: 12px 16px;
       }
       .settings-section-sub {
         margin-top: 2px;
@@ -4240,8 +5221,48 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
         margin: -4px 0 8px;
       }
 
-      .skip-soil a,
-      .moved-to-weather a {
+      /* A program's header row: its name and state, then its actions as
+         icons. On a phone the text wraps and the icons keep their room. */
+      .head-actions {
+        display: inline-flex;
+        flex: 0 0 auto;
+        align-items: center;
+        --mdc-icon-button-size: 36px;
+        --mdc-icon-size: 20px;
+        --ha-icon-button-size: 36px;
+      }
+      .head-actions ha-icon-button {
+        color: var(--primary-color);
+      }
+      .head-actions ha-icon-button.danger {
+        color: var(--error-color, #db4437);
+      }
+      .head-actions ha-icon-button.on {
+        background: rgba(var(--rgb-primary-color, 3, 169, 244), 0.12);
+        border-radius: 50%;
+      }
+      .state-chip {
+        display: inline-block;
+        margin-left: 6px;
+        padding: 0 8px;
+        border-radius: 10px;
+        font-size: 0.8em;
+        font-weight: 500;
+        line-height: 1.6;
+        color: var(--text-primary-color, #fff);
+        background: var(--primary-color);
+      }
+      .state-chip.waiting,
+      .state-chip.paused {
+        color: var(--primary-text-color);
+        background: var(--secondary-background-color, #e5e5e5);
+      }
+      .state-detail {
+        color: var(--secondary-text-color);
+        font-size: 0.9em;
+      }
+
+      .skip-soil a {
         color: var(--primary-color);
       }
 
@@ -4250,6 +5271,20 @@ export class SmartIrrigationViewGeneral extends SubscribeMixin(LitElement) {
       .setting-note {
         padding: 10px 0 12px;
         line-height: 1.4;
+      }
+
+      /* What the switch just above means: set as the hint under a label is
+         (the Panel card), not as a paragraph of its own under a divider. */
+      .setting-row:has(+ .setting-note),
+      .setting-row:has(+ .setting-help) {
+        border-bottom: 0;
+      }
+      .setting-row + .setting-note,
+      .setting-help {
+        font-size: 0.8rem;
+        color: var(--secondary-text-color);
+        line-height: 1.4;
+        padding: 0 0 12px;
       }
 
       /* number + unit-select on a single line (e.g. update interval) */

@@ -4,11 +4,13 @@ A program is a plan: tours of steps, a step being the zones watered together
 with the seconds each gets (programs.py works that out from the zones as they
 are when the program starts its turn). This module walks the plan.
 
-One program, or one cycle of the main program, runs at a time: a second one
-takes its turn behind the first, which is what keeps the pressure of a home
-network and what a manual run asked for during a program is owed. The plan is
-worked out after the turn comes, not when the run was asked for, since the
-zones may well have been watered or changed meanwhile.
+Runs that share a supply take turns: a second one waits behind the first,
+which is what keeps the pressure of a home network and what a manual run asked
+for during a program is owed. Zones without a supply share the mains, and the
+one-off run of every zone ("irrigate all zones now") takes the turn on every
+supply. Runs on supplies of their own water side by side (turns.py). The plan is worked out after the turn comes,
+not when the run was asked for, since the zones may well have been watered or
+changed meanwhile.
 
 A negative delay after a step overlaps it with the next: the next step starts
 that many seconds before the current one ends (never more than it has to run),
@@ -25,12 +27,14 @@ record first, as for any run).
 import asyncio
 import logging
 from datetime import timedelta
+from typing import Any, cast
 
 import homeassistant.util.dt as dt_util
 
 from . import const
-from .master_switch import irrigation_off
+from .master_switch import watering_off
 from .programs import (
+    MAIN_PROGRAM_ID,
     below_deficit,
     find_program,
     overlap_seconds,
@@ -39,6 +43,7 @@ from .programs import (
     restrict_plan,
     step_wall_seconds,
 )
+from .turns import NO_SUPPLY, Keys, Turns
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -88,6 +93,46 @@ class ProgramRun:
         self.seconds = None
         self.requested: str | None = None
         self.queued = False
+        # A scheduled run's planned moment: when it finds nothing to water, the
+        # programs that come after it start from there. None for a manual run.
+        self.chain_moment = None
+        # Set when the run's turn came and its plan had nothing to water.
+        self.nothing_to_water = False
+
+    def really_ran(self) -> bool:
+        """Whether the run counts as having watered, for what starts after it.
+
+        At least one zone watered, and the run went to its end or was cut by
+        its hard deadline (the time it had was used). Stopped any other way (by
+        hand, by stop_watering, replaced by another run, or its program deleted,
+        suspended or switched off while it ran), it does not: whoever stopped
+        the watering did not want the next program either. Nor does a run whose
+        zones all failed to open. A scheduled run held back by the weather,
+        suspended or with nothing to water never got here: it starts what
+        comes after it from its planned moment instead (program_scheduler.py).
+        """
+        if self.stop.is_set() and not self.cut:
+            return False
+        return any(result.get("ran") for result in self.results)
+
+
+def program_run_records(value) -> dict:
+    """The record of the programs a restart interrupted: {program id: record}.
+
+    Programs on supplies of their own water side by side, each with its entry.
+    Before that there was one program at a time and the record was its own,
+    which is read as an entry of its own.
+    """
+    if not isinstance(value, dict):
+        return {}
+    if isinstance(value.get("plan"), list):
+        program_id = value.get("program_id")
+        return {program_id: value} if program_id else {}
+    return {
+        key: record
+        for key, record in value.items()
+        if isinstance(record, dict) and record.get("program_id") == key
+    }
 
 
 def order_driest_first(plan: list, zones) -> list:
@@ -182,8 +227,7 @@ class ProgramRunnerMixin:
         A running program closes its open zones the normal way (each is credited
         for what it delivered) and starts no further step. Returns ``"stopped"``,
         ``"dequeued"``, or None for a program that neither runs nor waits (an
-        unknown id included: nothing happens). The main program has no run of its
-        own; ``stop_watering`` stops it.
+        unknown id included: nothing happens).
         """
         registry = self._program_registry()
         run = registry.get(program_id)
@@ -206,12 +250,45 @@ class ProgramRunnerMixin:
         _LOGGER.info("Program %s stopped", program_id)
         return "stopped"
 
-    def _executor_lock(self) -> asyncio.Lock:
-        """The one turn at the valves, shared by programs and cycles."""
-        lock = getattr(self, "_executor_turn", None)
-        if lock is None:
-            lock = self._executor_turn = asyncio.Lock()
-        return lock
+    def _turns(self) -> Turns:
+        """The turns at the valves, by supply, shared by every kind of run."""
+        turns = getattr(self, "_executor_turns", None)
+        if turns is None:
+            turns = self._executor_turns = Turns()
+        return turns
+
+    def _zone_turn_keys(self, zone_ids) -> frozenset:
+        """The supplies of these zones: theirs, or the mains for one with none."""
+        coordinator = cast(Any, self)
+        supply_for = getattr(coordinator, "_supply_for_zone", None)
+        keys = set()
+        for zone_id in zone_ids:
+            try:
+                zone = coordinator.store.get_zone(int(zone_id))
+            except (TypeError, ValueError):
+                continue
+            supply = supply_for(zone) if zone is not None and supply_for else None
+            keys.add(supply[const.SUPPLY_ID] if supply is not None else NO_SUPPLY)
+        return frozenset(keys)
+
+    def program_turn_keys(self, program_id) -> Keys:
+        """The supplies of every zone a program's steps name, as it is now.
+
+        Every zone, not only those the plan will water: the plan is only worked
+        out once the turn has come.
+        """
+        program = find_program(
+            getattr(self.store.config, const.CONF_PROGRAMS, None), program_id
+        )
+        if program is None:
+            return frozenset()
+        zone_ids = [
+            zone_id
+            for step in program.get(const.PROGRAM_STEPS) or []
+            if isinstance(step, dict)
+            for zone_id in step.get(const.STEP_ZONES) or []
+        ]
+        return self._zone_turn_keys(zone_ids)
 
     def _programs_resuming(self) -> dict:
         """The programs whose interrupted pass is being finished after a restart."""
@@ -230,17 +307,15 @@ class ProgramRunnerMixin:
     # --- asking for a run ----------------------------------------------------
 
     def _program_allowed(self, program_id) -> bool:
-        """Whether the program may water: it is there, enabled, not suspended."""
+        """Whether the program may water: it is there and not suspended."""
         config = self.store.config
         if getattr(config, const.CONF_FULL_CONTROLLER, False) is not True:
             return False
-        if irrigation_off(config):
+        if watering_off(config):
             return False
         program = find_program(getattr(config, const.CONF_PROGRAMS, None), program_id)
-        return (
-            program is not None
-            and program.get(const.PROGRAM_ENABLED) is not False
-            and not self.is_suspended(const.SUSPEND_PROGRAM, program_id)
+        return program is not None and not self.is_suspended(
+            const.SUSPEND_PROGRAM, program_id
         )
 
     async def async_run_program(
@@ -252,6 +327,7 @@ class ProgramRunnerMixin:
         seconds=None,
         mode=const.RUN_MODE_QUEUE,
         deadline=None,
+        chain_moment=None,
     ) -> bool:
         """Run a program now, or as soon as it is its turn. False if not started.
 
@@ -265,14 +341,17 @@ class ProgramRunnerMixin:
         proportion to their planned durations; without it the planned durations.
         ``mode`` is ``queue`` (take the turn behind what runs) or ``replace``
         (stop what runs and waits, cleanly, then run this one).
+        ``chain_moment`` is a scheduled run's planned moment: if the run finds
+        nothing to water, the programs that come after it start from there.
         """
         config = self.store.config
         if getattr(config, const.CONF_FULL_CONTROLLER, False) is not True:
             _LOGGER.warning(
-                "Program %s not run: the full controller is off", program_id
+                "Program %s not run: Smart Irrigation is not set to Calculate and water",
+                program_id,
             )
             return False
-        if irrigation_off(config):
+        if watering_off(config):
             _LOGGER.info(
                 "Program %s not run: Smart Irrigation is switched off", program_id
             )
@@ -281,17 +360,11 @@ class ProgramRunnerMixin:
         if program is None:
             _LOGGER.warning("Program %s does not exist", program_id)
             return False
-        if program.get(const.PROGRAM_ENABLED) is False:
-            _LOGGER.info("Program %s is disabled, not run", program_id)
-            return False
         if self.is_suspended(const.SUSPEND_PROGRAM, program_id):
             _LOGGER.info("Program %s is suspended, not run", program_id)
             return False
         if mode == const.RUN_MODE_REPLACE:
             await self._stop_for_replacement(program_id)
-        if program.get(const.PROGRAM_MAIN):
-            await self.async_run_direct_valves()
-            return True
         registry = self._program_registry()
         if program_id in registry:
             _LOGGER.info("Program %s is already running or waiting", program_id)
@@ -303,9 +376,10 @@ class ProgramRunnerMixin:
             note_day,
         )
         run.deadline = deadline
+        run.chain_moment = chain_moment
         run.seconds = seconds
         run.requested = dt_util.utcnow().isoformat()
-        if manual and self._executor_lock().locked():
+        if manual and self._turns().would_wait(self.program_turn_keys(program_id)):
             # It will have to wait: recorded, so a restart does not lose it.
             run.queued = True
 
@@ -340,10 +414,13 @@ class ProgramRunnerMixin:
         registry[run.program_id] = run
         cancelled = False
         watcher = None
+        finished_plan = False
         try:
             if run.queued:
                 await self._persist_manual_queue()
-            async with self._executor_lock():
+            async with self._turns().turn(
+                lambda: self.program_turn_keys(run.program_id)
+            ):
                 if run.stop.is_set():
                     return
                 run.turn_taken = True
@@ -354,6 +431,7 @@ class ProgramRunnerMixin:
                 plan, tour, step = await make_plan()
                 if not plan:
                     _LOGGER.info("Program %s has nothing to water", run.program_id)
+                    run.nothing_to_water = True
                     return
                 if run.deadline is not None and dt_util.utcnow() >= run.deadline:
                     # No time left at all: nothing opens, and the record says why.
@@ -384,6 +462,7 @@ class ProgramRunnerMixin:
                     watcher = asyncio.ensure_future(self._watch_deadline(run))
                 await self._execute_plan(run, plan, tour, step)
                 self._report_program_finished(run)
+                finished_plan = True
         except asyncio.CancelledError:
             # A restart or a reload: the record stays, for the next start.
             cancelled = True
@@ -398,12 +477,38 @@ class ProgramRunnerMixin:
             run.finished.set()
             self._notify_programs()
             if not cancelled:
-                await self.store.async_update_config(
-                    {const.CONF_ACTIVE_PROGRAM_RUN: None}
-                )
+                if run.turn_taken:
+                    # Only its own record: another program may be watering.
+                    await self._drop_program_record(run.program_id)
                 if run.queued:
                     # Stopped or dequeued while it waited: out of the record too.
                     await self._persist_manual_queue()
+                # The programs that start after this one (schedules of the type
+                # "after"), once its turn is given back: a chained run on the
+                # same supply takes it next. Manual runs count as much as
+                # scheduled ones.
+                # A scheduled run that found nothing to water starts them too,
+                # from its planned moment.
+                start_after = getattr(self, "async_start_programs_after", None)
+                try:
+                    if start_after is None:
+                        pass
+                    elif finished_plan and run.really_ran():
+                        await start_after(run.program_id, dt_util.utcnow())
+                    elif (
+                        run.nothing_to_water
+                        and run.chain_moment is not None
+                        and not run.stop.is_set()
+                    ):
+                        await start_after(
+                            run.program_id, run.chain_moment, held_back=True
+                        )
+                except Exception as e:  # noqa: BLE001 - the run is over
+                    _LOGGER.error(
+                        "Program %s: could not start what comes after it: %s",
+                        run.program_id,
+                        e,
+                    )
 
     # --- the hard deadline ---------------------------------------------------
 
@@ -487,7 +592,7 @@ class ProgramRunnerMixin:
                     await self._cut_at_deadline(run)
                     return
                 if not self._program_allowed(run.program_id):
-                    # Deleted, disabled or suspended while it ran, or the full
+                    # Deleted or suspended while it ran, or the full
                     # controller switched off: no further step opens a valve.
                     _LOGGER.info(
                         "Program %s can no longer run, stopped before its step %s",
@@ -516,9 +621,13 @@ class ProgramRunnerMixin:
                     soak = self._soak_seconds() if hasattr(self, "_soak_seconds") else 0
                     wall = step_wall_seconds(step, soak)
                     ahead = overlap_seconds(delay, wall)
+                    # Counted from the valves opening, not from the pump coming
+                    # on: 30 s asked overlapped by 35 behind a pump with a 5 s
+                    # lead (UX walk of 13 Nov., Q17).
+                    lead = self._step_supply_lead(zones)
                     task = asyncio.ensure_future(self._run_step(run, step))
                     inflight.append((task, zones))
-                    if not await self._wait_overlap(run, task, wall - ahead):
+                    if not await self._wait_overlap(run, task, lead + wall - ahead):
                         return
                     continue
                 try:
@@ -528,6 +637,31 @@ class ProgramRunnerMixin:
                 if delay > 0 and not last:
                     if await self._sleep_or_stop(run.stop, delay):
                         return
+
+    def _step_supply_lead(self, zones: list) -> float:
+        """Seconds between a step's start and its valves opening.
+
+        A supply that is off and comes on ahead of the valves (a positive delay,
+        a kick) holds them shut that long; one already on, or one the valve
+        leads, does not. The slowest of the step's zones counts.
+        """
+        supply_for = getattr(self, "_supply_for_zone", None)
+        if supply_for is None:
+            return 0.0
+        coordinator = cast(Any, self)
+        runtime = coordinator._supply_runtime()
+        lead = 0.0
+        for zone_id in zones:
+            zone = coordinator.store.get_zone(int(zone_id))
+            supply = supply_for(zone) if zone is not None else None
+            if supply is None or supply[const.SUPPLY_ID] in runtime["on"]:
+                continue
+            delay = float(supply.get(const.SUPPLY_DELAY_BEFORE) or 0.0)
+            if delay < 0:
+                continue
+            kick = float(supply.get(const.SUPPLY_KICK_SECONDS) or 0.0)
+            lead = max(lead, delay + max(0.0, kick))
+        return lead
 
     async def _wait_overlap(
         self, run: ProgramRun, task: asyncio.Future, seconds: float
@@ -646,7 +780,10 @@ class ProgramRunnerMixin:
             return None
         try:
             return await self._run_one_valve(
-                zone, passes=passes, max_litres=max_litres or None
+                zone,
+                passes=passes,
+                max_litres=max_litres or None,
+                source=run.program_id,
             )
         except asyncio.CancelledError:
             raise
@@ -661,27 +798,47 @@ class ProgramRunnerMixin:
 
     # --- the record that survives a restart -----------------------------------
 
+    def _program_record_lock(self) -> asyncio.Lock:
+        """Programs watering side by side write the same record one at a time."""
+        lock = getattr(self, "_program_record_writing", None)
+        if lock is None:
+            lock = self._program_record_writing = asyncio.Lock()
+        return lock
+
+    async def _write_program_record(self, program_id, record) -> None:
+        """Set (or, with None, drop) one program's entry in the stored record."""
+        async with self._program_record_lock():
+            records = program_run_records(
+                getattr(self.store.config, const.CONF_ACTIVE_PROGRAM_RUN, None)
+            )
+            if record is None:
+                records.pop(program_id, None)
+            else:
+                records[program_id] = record
+            await self.store.async_update_config(
+                {const.CONF_ACTIVE_PROGRAM_RUN: records or None}
+            )
+
     async def _persist_program_run(
         self, run: ProgramRun, plan: list, tour: int, step: int
     ) -> None:
-        await self.store.async_update_config(
+        await self._write_program_record(
+            run.program_id,
             {
-                const.CONF_ACTIVE_PROGRAM_RUN: {
-                    "program_id": run.program_id,
-                    "name": run.name,
-                    "manual": run.manual,
-                    "plan": plan,
-                    "tour": tour,
-                    "step": step,
-                    "started_zones": sorted(run.started_zones),
-                    "started": run.started or dt_util.utcnow().isoformat(),
-                    **(
-                        {"deadline": run.deadline.isoformat()}
-                        if run.deadline is not None
-                        else {}
-                    ),
-                }
-            }
+                "program_id": run.program_id,
+                "name": run.name,
+                "manual": run.manual,
+                "plan": plan,
+                "tour": tour,
+                "step": step,
+                "started_zones": sorted(run.started_zones),
+                "started": run.started or dt_util.utcnow().isoformat(),
+                **(
+                    {"deadline": run.deadline.isoformat()}
+                    if run.deadline is not None
+                    else {}
+                ),
+            },
         )
 
     # --- the queue of manual runs and the pause, across a restart ---------------
@@ -759,8 +916,8 @@ class ProgramRunnerMixin:
         """Whether something a restart interrupted is still being finished.
 
         A program (its record or its resume), a plain valve run or a cycle: the
-        last two take no turn at the executor lock, so a queued program asked for
-        meanwhile would open alongside them.
+        last two take no turn, so a queued program asked for meanwhile would open
+        alongside them.
         """
         config = self.store.config
         return bool(
@@ -787,7 +944,7 @@ class ProgramRunnerMixin:
             program_id = entry.get("program_id")
             seconds = entry.get("seconds")
             # Each takes the turn in the order asked: the next is asked for when
-            # the previous has registered (it waits on the lock, or runs).
+            # the previous has registered (it waits for its turn, or runs).
             task = asyncio.ensure_future(
                 self.async_run_program(program_id, manual=True, seconds=seconds)
             )
@@ -805,8 +962,8 @@ class ProgramRunnerMixin:
                 task.cancel()
             raise
 
-    async def _drop_program_record(self) -> None:
-        await self.store.async_update_config({const.CONF_ACTIVE_PROGRAM_RUN: None})
+    async def _drop_program_record(self, program_id) -> None:
+        await self._write_program_record(program_id, None)
 
     async def _resume_program(self, record: dict, resumed: list) -> None:
         """Go on with the steps a restart interrupted, after the open run's end.
@@ -820,7 +977,7 @@ class ProgramRunnerMixin:
             seconds=const.CYCLE_RESUME_MAX_AGE_SECONDS
         ):
             _LOGGER.info("The interrupted program run is too old, dropped")
-            await self._drop_program_record()
+            await self._drop_program_record((record or {}).get("program_id"))
             return
         plan = record.get("plan") or []
         program_id = record.get("program_id")
@@ -840,15 +997,16 @@ class ProgramRunnerMixin:
         finally:
             resuming.pop(program_id, None)
         if not plan or not program_id or program_id in self._program_registry():
-            await self._drop_program_record()
+            if program_id and program_id not in self._program_registry():
+                await self._drop_program_record(program_id)
             return
         if not self._program_allowed(program_id):
             _LOGGER.info(
-                "Program %s can no longer run (deleted, disabled, suspended or the "
-                "full controller is off), its interrupted run is dropped",
+                "Program %s can no longer run (deleted, suspended or the full "
+                "controller is off), its interrupted run is dropped",
                 program_id,
             )
-            await self._drop_program_record()
+            await self._drop_program_record(program_id)
             return
         run = ProgramRun(
             program_id, record.get("name") or program_id, bool(record.get("manual"))
@@ -909,6 +1067,40 @@ class ProgramRunnerMixin:
         self.hass.bus.async_fire(
             f"{const.DOMAIN}_{const.EVENT_PROGRAM_STARTED}", payload
         )
+        if run.program_id == MAIN_PROGRAM_ID and not resumed:
+            self._announce_legacy_start(plan)
+
+    def _announce_legacy_start(self, plan: list) -> None:
+        """The ``irrigation_started`` of the old main program, for its own.
+
+        The main program became an ordinary program that kept its id; the
+        automations that listened to the events of its cycle still hear them,
+        with the payload they had: the sequencing (parallel when a step waters
+        several zones together), and the zones with their seconds.
+        deprecated: remove in 2027.11
+        """
+        steps = plan[0] if plan else []
+        announce = getattr(self, "_announce_start", None)
+        if announce is None:
+            return
+        announce(
+            (
+                const.CONF_ZONE_SEQUENCING_PARALLEL
+                if any(len(step["zones"]) > 1 for step in steps)
+                else const.CONF_ZONE_SEQUENCING_SEQUENTIAL
+            ),
+            [
+                {
+                    const.ZONE_ID: member["zone_id"],
+                    const.ZONE_NAME: (self.store.get_zone(member["zone_id"]) or {}).get(
+                        const.ZONE_NAME
+                    ),
+                    const.ZONE_DURATION: member["seconds"],
+                }
+                for step in steps
+                for member in step["zones"]
+            ],
+        )
 
     def _report_program_finished(self, run: ProgramRun) -> None:
         by_zone: dict = {}
@@ -955,3 +1147,9 @@ class ProgramRunnerMixin:
                 ),
             },
         )
+        report = getattr(self, "_report_finished", None)
+        if run.program_id == MAIN_PROGRAM_ID and report is not None:
+            # The ``irrigation_finished`` of the old main program's cycle, with
+            # its payload (see _announce_legacy_start). deprecated: remove in
+            # 2027.11
+            report(run.results)

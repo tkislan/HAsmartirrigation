@@ -65,6 +65,8 @@ export class SmartIrrigationConfig {
   full_controller?: boolean;
   // The master switch: false stops every calculation and every watering.
   irrigation_enabled?: boolean;
+  /** False while calculating only (the master switch on). */
+  watering_enabled?: boolean;
   zone_sequencing: string;
   // Shorten a run after recent rain, from a binary rain sensor's history.
   rain_history_enabled?: boolean;
@@ -72,6 +74,15 @@ export class SmartIrrigationConfig {
   watering_passes?: number;
   soak_minutes?: number;
   pause_between_zones?: number;
+  /** Failed runs in a row before a zone is set aside; 0: never. */
+  set_aside_after?: number;
+  /** Litres a meter may count with every valve closed; 0: not watched. */
+  leak_alert_litres?: number;
+  /** Each zone's failed runs in a row, and since when it is set aside. */
+  zone_failures?: Record<
+    string,
+    { count?: number; reason?: string; set_aside?: string | null }
+  > | null;
   calc_log_enabled: boolean;
   install_blueprints?: boolean;
 
@@ -175,9 +186,14 @@ export interface SmartIrrigationStep {
 export interface SmartIrrigationSchedule {
   id?: string;
   enabled: boolean;
-  type: "time" | "sun";
+  /** "after": started when another program has really watered and finished. */
+  type: "time" | "sun" | "after";
+  /** With the type "after": the id of the program it starts after. */
+  after_program?: string | null;
   time: string;
-  event: "sunrise" | "sunset";
+  event: "sunrise" | "sunset" | "azimuth";
+  /** With the event azimuth: the sun's bearing, degrees from north. */
+  azimuth?: number;
   offset_minutes: number;
   /** Whether the moment is when the program starts or when it must be done. */
   anchor: "start" | "end";
@@ -202,16 +218,26 @@ export interface SmartIrrigationSchedule {
   hard_deadline?: boolean;
 }
 
-/** A program of the full controller. The main one has no steps of its own. */
+/**
+ * A program of the full controller. Every program is the same kind: steps of
+ * zones, started on its own by its schedules that are on, or by hand.
+ */
 export interface SmartIrrigationProgram {
   id?: string;
   name: string;
-  enabled: boolean;
-  main?: boolean;
   steps?: SmartIrrigationStep[];
   delay?: number;
   tours?: number;
   schedules?: SmartIrrigationSchedule[];
+  /** Whom to tell when it has watered; absent: nobody. */
+  notify?: SmartIrrigationProgramNotify;
+}
+
+/** A program's notifications: notify entities or actions, or persistent_notification. */
+export interface SmartIrrigationProgramNotify {
+  targets: string[];
+  when: "finish" | "problems";
+  start: boolean;
 }
 
 /** A pump or a main valve that runs while a zone it feeds is being watered. */
@@ -263,8 +289,10 @@ export class SmartIrrigationZone {
   current_drainage?: number;
   linked_entity?: string;
   safety_off_topic?: string;
+  safety_off_entity?: string | null;
   safety_off_state_key?: string;
   safety_off_mode?: string;
+  safety_off_required?: boolean | null;
   confirm_timeout?: number | null;
   open_resends?: number | null;
   supply_id?: string | null;
@@ -272,6 +300,7 @@ export class SmartIrrigationZone {
   measured_throughput?: number | null;
   measured_throughput_samples?: number;
   flow_sensor?: string;
+  observed_ignore_seconds?: number | null;
   soil_moisture_sensor?: string;
   soil_moisture_threshold?: number;
   input_method?: string;

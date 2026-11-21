@@ -1,4 +1,4 @@
-export const VERSION = "v2026.11.0";
+export const VERSION = "v2026.11.1-beta1";
 export const REPO = "https://github.com/altmenorg/HAsmartirrigation";
 export const ISSUES_URL = REPO + "/issues";
 
@@ -199,13 +199,18 @@ export const ZONE_CROP_FACTOR_BY_MONTH = "crop_factor_by_month";
 export const ZONE_ALLOWED_DEPLETION = "allowed_depletion";
 export const ZONE_DISTRIBUTION_EFFICIENCY = "distribution_efficiency";
 export const ZONE_SAFETY_OFF_TOPIC = "safety_off_topic";
+// A number the valve reads its own open duration from (Gardena).
+export const ZONE_SAFETY_OFF_ENTITY = "safety_off_entity";
 export const ZONE_SUPPLY_ID = "supply_id";
 export const ZONE_EXTRA_ENTITIES = "extra_entities";
 export const ZONE_SAFETY_OFF_STATE_KEY = "safety_off_state_key";
 export const ZONE_SAFETY_OFF_MODE = "safety_off_mode";
+// Skip a watering rather than open the valve without its own timer (#893).
+export const ZONE_SAFETY_OFF_REQUIRED = "safety_off_required";
 export const ZONE_CONFIRM_TIMEOUT = "confirm_timeout";
 export const ZONE_OPEN_RESENDS = "open_resends";
 export const ZONE_FLOW_SENSOR = "flow_sensor";
+export const ZONE_OBSERVED_IGNORE_SECONDS = "observed_ignore_seconds";
 export const ZONE_SOIL_MOISTURE_SENSOR = "soil_moisture_sensor";
 export const ZONE_SOIL_MOISTURE_THRESHOLD = "soil_moisture_threshold";
 export const ZONE_INPUT_METHOD = "input_method";

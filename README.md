@@ -11,14 +11,14 @@
   <img src="https://raw.githubusercontent.com/altmenorg/HAsmartirrigation/master/images/smart_irrigation_horizontal.svg?sanitize=true" alt="Smart Irrigation" width="720">
 </p>
 
-**Smart Irrigation waters your garden from Home Assistant, with the water the weather actually took out of it.**
+**Smart Irrigation waters your garden from Home Assistant, putting back the water that sun, heat and wind took from the soil.**
 
 It works out, zone by zone, how much water the plants lost to [evapotranspiration](https://en.wikipedia.org/wiki/Evapotranspiration) and got back from the rain, and it waters the difference: not a fixed fifteen minutes, not the day after a storm, and more in a heatwave. Then it runs the watering itself, as much of it as you want it to.
 
 ## Three ways to use it
 
 1. **It calculates, you water.** Each zone gets a duration, a water balance and the reasons behind them, as entities and events. Your own automation, a blueprint for your controller (Rain Bird, Hydrawise, Rachio, OpenSprinkler, B-hyve, ESPHome), or [Irrigation Unlimited](https://github.com/rgc99/irrigation_unlimited) does the watering.
-2. **It opens the valves.** With **direct valve control**, Smart Irrigation waters each zone for its duration: zones in turn or together, cycle and soak so clay takes the water in, a pause between zones, a watchdog for a valve left open, and the water actually delivered credited to the zone.
+2. **It opens the valves.** With **Calculate and water**, Smart Irrigation waters each zone for its duration: zones in turn or together, cycle and soak so clay takes the water in, a pause between zones, a watchdog for a valve left open, and the water actually delivered credited to the zone.
 3. **It runs your whole irrigation.** The **full controller** (optional, off by default) adds programs, schedules, pumps and a planning: everything a dedicated irrigation controller does, fed by the calculated durations.
 
 ## ✨ Highlights
@@ -27,6 +27,7 @@ It works out, zone by zone, how much water the plants lost to [evapotranspiratio
 
 - 🗓️ **Programs** of ordered steps, one zone or several at once, watered for the calculated duration or a share of it, with passes, waits, limits and a minimum deficit per step.
 - ⏰ **Schedules** anchored to a start or to an end ("done by sunrise"): days of the week, every N days, odd or even days, months, a period of the year. Each one shows what can hold it back.
+- 🔗 **Chained programs**: a program can start after another one ("the beds 30 minutes after the lawn"), whatever its length that day, only when the first one really watered.
 - 🚿 **Pumps and main valves** with their delays, the other valves of a zone, and a confirmation that a valve really opened.
 - 📅 **A planning** of what will run, when and why, and the running watering shown on the Home page, the zones and the card. Pause, resume, queue, suspend, run now.
 - 🔁 **Imports an Irrigation Unlimited configuration** in a few clicks.
@@ -59,7 +60,9 @@ It works out, zone by zone, how much water the plants lost to [evapotranspiratio
 
 **Via HACS (recommended).** Smart Irrigation is in the HACS default store, so there is no repository to add:
 
-1. In [HACS](https://hacs.xyz), search for **Smart Irrigation** and click **Download**.
+[![Open Smart Irrigation in HACS on your Home Assistant](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/_change/?redirect=marketplace_repository%2F%3Fowner%3Daltmenorg%26repository%3DHAsmartirrigation%26category%3Dintegration)
+
+1. Open it in HACS with the button above (it asks for your Home Assistant address), or search for **Smart Irrigation** in [HACS](https://hacs.xyz), and click **Download**.
 2. **Restart Home Assistant**, then add it from *Settings → Devices & Services → Add Integration → Smart Irrigation*.
 
 **Manually.** Download the [latest release](https://github.com/altmenorg/HAsmartirrigation/releases) and extract it into `custom_components/smart_irrigation/`, then restart Home Assistant.
@@ -72,7 +75,7 @@ Full documentation: **[altmenorg.github.io/HAsmartirrigation](https://altmenorg.
 
 ## Irrigation start triggers
 
-Smart Irrigation computes irrigation **durations**, and either opens the valves itself (direct valve control) or leaves the watering to your own automation. A **start trigger** schedules a start relative to a solar event (sunrise, sunset or solar azimuth, ± an offset) or at a fixed clock time, and fires the Home Assistant event `smart_irrigation_start_irrigation_all_zones` so an automation can react.
+Smart Irrigation computes irrigation **durations**, and either opens the valves itself (**Calculate and water**) or leaves the watering to your own automation (**Calculate only**). A **start trigger** schedules a start relative to a solar event (sunrise, sunset or solar azimuth, ± an offset) or at a fixed clock time, and fires the Home Assistant event `smart_irrigation_start_irrigation_all_zones` so an automation can react.
 
 You can define several triggers, but only the one selected as active starts the watering, once per day. Besides your own triggers, the choice offers **Default** (finish at sunrise: sunrise minus the planned length of the run) and **None** (Smart Irrigation starts no watering). The event data identifies which trigger fired:
 

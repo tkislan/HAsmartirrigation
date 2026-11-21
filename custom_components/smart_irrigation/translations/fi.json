@@ -38,19 +38,7 @@
           "waiting": "Odottaa",
           "running": "Käynnissä",
           "paused": "Tauolla",
-          "suspended": "Keskeytetty",
-          "disabled": "Poistettu käytöstä"
-        }
-      },
-      "program_main": {
-        "name": "Pääohjelma",
-        "state": {
-          "idle": "Lepotilassa",
-          "waiting": "Odottaa",
-          "running": "Käynnissä",
-          "paused": "Tauolla",
-          "suspended": "Keskeytetty",
-          "disabled": "Poistettu käytöstä"
+          "suspended": "Keskeytetty"
         }
       }
     },
@@ -113,6 +101,12 @@
       },
       "any_problem": {
         "name": "Ongelma"
+      },
+      "leak": {
+        "name": "Vuoto"
+      },
+      "observed_watering": {
+        "name": "Havaittu kastelu"
       }
     },
     "switch": {
@@ -144,20 +138,13 @@
     }
   },
   "options": {
-    "error": {
-      "invalid_coordinates": "Annetut koordinaatit ovat virheellisiä. Tarkista leveysaste (-90...90) ja pituusaste (-180...180)."
-    },
     "step": {
-      "coordinates": {
-        "title": "Sijainnin koordinaatit",
-        "description": "Määritä sijainnin koordinaatit säätietojen hakua varten. Voit tarvittaessa käyttää Home Assistant -sijainnista poikkeavia manuaalisia koordinaatteja.",
-        "data": {
-          "manual_coordinates_enabled": "Käytä manuaalisia koordinaatteja Home Assistant -sijainnin sijaan",
-          "manual_latitude": "Leveysaste (desimaaliasteet, -90...90)",
-          "manual_longitude": "Pituusaste (desimaaliasteet, -180...180)",
-          "manual_elevation": "Korkeus merenpinnasta (metreinä, valinnainen)"
-        }
+      "init": {
+        "title": "Smart Irrigation"
       }
+    },
+    "abort": {
+      "use_panel": "Smart Irrigation määritetään sen omassa paneelissa: avaa Smart Irrigation sivupalkista. Sijainti, jolle sää haetaan, löytyy kohdasta Sää › Sääpalvelu (tila: Edistynyt)."
     }
   },
   "services": {
@@ -325,7 +312,7 @@
     },
     "run_program": {
       "name": "Suorita ohjelma",
-      "description": "Suorita täyden ohjaimen ohjelma nyt, tai heti kun on sen vuoro, jos toinen ohjelma on käynnissä. Ohjelma kastelee vyöhykkeensä Smart Irrigationin laskemilla kestoilla, elleivät sen vaiheet määrää toisin.",
+      "description": "Suorita ohjelma nyt, tai heti kun on sen vuoro, jos toinen ohjelma on käynnissä. Ohjelma kastelee vyöhykkeensä Smart Irrigationin laskemilla kestoilla, elleivät sen vaiheet määrää toisin.",
       "fields": {
         "program_id": {
           "name": "Ohjelma",
@@ -343,7 +330,7 @@
     },
     "stop_program": {
       "name": "Pysäytä ohjelma",
-      "description": "Pysäytä yksi ohjelma. Jos se on käynnissä, sen avoimet vyöhykkeet suljetaan normaalisti ja niille hyvitetään niiden antama vesi; jos se odottaa vuoroaan, se poistetaan jonosta. Tuntematon ohjelma ei tee mitään. Pääohjelma pysäytetään toiminnolla stop_watering.",
+      "description": "Pysäytä yksi ohjelma. Jos se on käynnissä, sen avoimet vyöhykkeet suljetaan normaalisti ja niille hyvitetään niiden antama vesi; jos se odottaa vuoroaan, se poistetaan jonosta. Tuntematon ohjelma ei tee mitään. Kaikki kastelu pysäytetään toiminnolla stop_watering.",
       "fields": {
         "program_id": {
           "name": "Ohjelma",
@@ -352,8 +339,8 @@
       }
     },
     "set_program_enabled": {
-      "name": "Ota ohjelma käyttöön tai poista käytöstä",
-      "description": "Kytke täyden ohjaimen ohjelma päälle tai pois, kuten sen asetusten kytkin tekee.",
+      "name": "Kytke ohjelman kaikki aikataulut päälle tai pois (vanhentunut)",
+      "description": "Vanhentunut: kytkee ohjelman kaikki aikataulut päälle tai pois. Ohjelmalla ei ole enää omaa päälle/pois-kytkintä; käytä yhdelle aikataululle set_schedule_enabled-toimintoa. Poistetaan versiossa 2027.11.",
       "fields": {
         "program_id": {
           "name": "Ohjelma",
@@ -443,7 +430,7 @@
     },
     "adjust_program": {
       "name": "Säädä ohjelmaa",
-      "description": "Saa täyden ohjaimen ohjelma kastelemaan pidempään tai lyhyemmin joksikin aikaa. Säätö korvaa edellisen (säädöt eivät koskaan summaudu), koskee sen asettamisen jälkeen alkavia ajoja ja päättyy annettujen tuntien jälkeen.",
+      "description": "Saa ohjelma kastelemaan pidempään tai lyhyemmin joksikin aikaa. Säätö korvaa edellisen (säädöt eivät koskaan summaudu), koskee sen asettamisen jälkeen alkavia ajoja ja päättyy annettujen tuntien jälkeen.",
       "fields": {
         "program_id": {
           "name": "Ohjelma",
@@ -761,9 +748,39 @@
       "title": "Toiminto {action} poistuu",
       "description": "Automaatio, skripti tai kojelauta kutsui toimintoa **{action}**. Se toimii yhä, mutta se poistetaan versiosta {version} alkaen, talvella, kastelukauden ulkopuolella.\n\nKäytä sen sijaan toimintoa **{replacement}**: se tekee saman, ja kaikille vyöhykkeille, kun vyöhykettä ei ole valittu. Tämä ilmoitus palaa jokaisella vanhan nimen kutsulla, kunnes niitä ei ole enää jäljellä."
     },
+    "deprecated_program_enabled": {
+      "title": "Toiminto {action} poistuu",
+      "description": "Automaatio, skripti tai kojelauta kutsui **{action}**. Ohjelmalla ei ole enää omaa päälle/pois-kytkintä, joten se kytkee nyt ohjelman kaikki aikataulut päälle tai pois. Se poistetaan versiosta {version} alkaen, talvella, kastelukauden ulkopuolella.\n\nKäytä sen sijaan **{replacement}**, kerran kutakin aikataulua kohden. Tämä ilmoitus palaa jokaisella vanhan nimen kutsulla, kunnes yhtään ei ole jäljellä."
+    },
     "deprecated_recurring_schedule": {
       "title": "Toistuvat aikataulut poistuvat: {action}",
       "description": "Automaatio, skripti tai kojelauta kutsui toimintoa **{action}**. Toistuvat aikataulut toimivat yhä, mutta ne poistetaan versiosta {version} alkaen, talvella, kastelukauden ulkopuolella.\n\nOhjelmien aikataulut tekevät saman, ja ne löytyvät paneelista: määritä ne kohdassa **Kastelu**, poista sitten toistuvat aikataulut ja kutsut toimintoon {action}."
+    },
+    "zone_set_aside": {
+      "title": "Vyöhyke {zone} on siirretty sivuun",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Ota vyöhyke {zone} takaisin käyttöön",
+            "description": "Vyöhykkeen **{zone}** venttiili epäonnistui {count} kertaa peräkkäin (ei auennut, ei antanut vettä tai sen ajastinta ei voitu asettaa), joten Smart Irrigation lopetti sen kastelun.\n\nTarkista venttiili, sen virta tai paristot ja vedensyöttö. Vyöhyke palaa itsestään, kun sen venttiilin nähdään aukeavan, esimerkiksi käsin kokeiltuna. Tai ota se käyttöön nyt.\n\nSmart Irrigation kastelee vyöhykettä {zone} taas seuraavasta kastelusta alkaen ja laskee epäonnistumiset nollasta."
+          }
+        }
+      }
+    },
+    "leak": {
+      "title": "Vettä virtaa kaikkien venttiilien ollessa kiinni",
+      "description": "Mittari **{meter}** laski {litres} l, kun kaikki vyöhykkeiden {zones} venttiilit olivat kiinni. Putki saattaa vuotaa tai venttiili olla jumissa auki.\n\nIlmoitus poistuu itsestään, kun mittari on pysynyt paikallaan puoli tuntia. Tapahtuma `smart_irrigation_leak` ja Vuoto-anturi antavat automaation sulkea pääventtiilin."
+    },
+    "moved_to_calculate_and_water": {
+      "title": "Suora venttiiliohjaus on nyt \"Laske ja kastele\"",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Kastelusi jatkuu kuten ennen",
+            "description": "Smart Irrigationilla on nyt yksi asetus sille, mitä se tekee: **Laske ja kastele**, **Vain laskenta** tai **Pysäytä kaikki**, Asetukset-välilehdellä. Asennuksesi avasi venttiilit itse, joten se siirrettiin tilaan **Laske ja kastele**.\n\nVyöhykkeesi kastellaan kuten ennen, samaan aikaan: aloituslaukaisimesta tuli **Kastelu**-ohjelman aikataulu uudella **Kastelu**-välilehdellä. Valitse **Vain laskenta**, jos Smart Irrigationin ei enää pidä avata venttiileitä."
+          }
+        }
+      }
     }
   }
 }

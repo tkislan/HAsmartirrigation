@@ -13,11 +13,16 @@ For the whole install (on the hub device), one entity to automate or show
 instead of one per zone:
 - any_zone_needs_water: on while a zone's irrigation_needed is on.
 - any_problem: on while a zone's problem is on.
+- leak: on while a zone's meter counts water with every valve closed.
+- observed_watering: on while observed watering is turned on, for an
+  automation shared between installs to know whether it must reset the
+  water balance itself (discussion #1012).
 
 Per-zone status entities inspired by JustChr's Smart Irrigation fork (MIT).
 """
 
 import logging
+from typing import cast
 
 from homeassistant.components.binary_sensor import DOMAIN as BINARY_PLATFORM
 from homeassistant.components.binary_sensor import (
@@ -25,8 +30,9 @@ from homeassistant.components.binary_sensor import (
     BinarySensorEntity,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EVENT_STATE_CHANGED
+from homeassistant.const import EVENT_STATE_CHANGED, EntityCategory
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change_event
@@ -86,8 +92,121 @@ async def async_setup_entry(
             SmartIrrigationAnyZoneBinarySensor(
                 hass, "any_problem", "problem", "mdi:alert-circle-outline"
             ),
+            SmartIrrigationObservedWateringBinarySensor(hass),
+            SmartIrrigationLeakBinarySensor(hass),
         ]
     )
+
+
+class SmartIrrigationLeakBinarySensor(BinarySensorEntity):
+    """On while a zone's meter counts water with every valve closed.
+
+    On the hub device, for an automation that closes a main valve or a
+    dashboard. Watched only when the option is set (leak_watch.py).
+    """
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _attr_translation_key = "leak"
+    _attr_device_class = BinarySensorDeviceClass.MOISTURE
+    _attr_icon = "mdi:pipe-leak"
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self._hass = hass
+        self.entity_id = f"{BINARY_PLATFORM}.{const.DOMAIN}_leak"
+        self._attr_is_on = False
+        self._meters: dict = {}
+
+    @property
+    def unique_id(self) -> str:
+        return f"{const.DOMAIN}_leak"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return cast(DeviceInfo, hub_device_info(self._hass))
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """The meters counting, and how many litres since the valves closed."""
+        return {"meters": self._meters}
+
+    @callback
+    def _recompute(self) -> None:
+        coordinator = (self._hass.data.get(const.DOMAIN) or {}).get("coordinator")
+        leaking = getattr(coordinator, "leaking_meters", None)
+        meters = leaking() if callable(leaking) else {}
+        self._meters = {k: round(v, 1) for k, v in meters.items()}
+        self._attr_is_on = bool(meters)
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self._recompute()
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self._hass, const.DOMAIN + "_leak_changed", self._async_refresh
+            )
+        )
+
+    @callback
+    def _async_refresh(self) -> None:
+        self._recompute()
+        self.async_write_ha_state()
+
+
+class SmartIrrigationObservedWateringBinarySensor(BinarySensorEntity):
+    """On while observed watering is on, on the hub device.
+
+    A setting, not a state that changes on its own: shown so that one
+    automation shared between several installs can tell whether Smart
+    Irrigation credits the runs itself or the automation must reset the water
+    balance. Read only; the setting is changed in the panel.
+    """
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _attr_translation_key = "observed_watering"
+    _attr_icon = "mdi:water-check"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self._hass = hass
+        self.entity_id = f"{BINARY_PLATFORM}.{const.DOMAIN}_observed_watering"
+        self._attr_is_on = False
+
+    @property
+    def unique_id(self) -> str:
+        return f"{const.DOMAIN}_observed_watering"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return cast(DeviceInfo, hub_device_info(self._hass))
+
+    @callback
+    def _recompute(self) -> None:
+        coordinator = (self._hass.data.get(const.DOMAIN) or {}).get("coordinator")
+        config = getattr(getattr(coordinator, "store", None), "config", None)
+        self._attr_is_on = (
+            getattr(config, const.CONF_OBSERVED_WATERING_ENABLED, False) is True
+        )
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self._recompute()
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self._hass, const.DOMAIN + "_config_updated", self._async_refresh
+            )
+        )
+
+    @callback
+    def _async_refresh(self, zone_id=None) -> None:
+        # Zone updates come through here too: only the setting matters.
+        if zone_id is not None:
+            return
+        before = self._attr_is_on
+        self._recompute()
+        if self._attr_is_on != before:
+            self.async_write_ha_state()
 
 
 class SmartIrrigationZoneBinarySensor(BinarySensorEntity):
@@ -435,6 +554,12 @@ class SmartIrrigationZoneProblemBinarySensor(
         self.async_on_remove(
             async_dispatcher_connect(
                 self._hass, const.DOMAIN + "_zone_irrigated", self._async_run_ok
+            )
+        )
+        # A zone set aside and put back has no problem left to show.
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self._hass, const.DOMAIN + "_zone_put_back", self._async_run_ok
             )
         )
 

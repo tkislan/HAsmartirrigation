@@ -173,33 +173,14 @@ def test_a_change_without_a_bucket_does_not_touch_the_duration():
     }
 
 
-_MAIN = {"id": "main", "name": "Main program", "main": True, "enabled": True}
-
-
-async def test_the_main_program_started_by_the_trigger_is_in_the_planning():
-    """A garden watered every morning by the start trigger was "not planned".
-
-    Without schedules of its own, the main program is started by the trigger,
-    whose time the Info page works out and hands over here.
-    """
-    hass, coord = _status([_MAIN])
+async def test_a_program_without_schedules_is_not_planned():
+    hass, coord = _status(
+        [{"id": "main", "name": "Watering", "steps": [{"zones": [0]}]}]
+    )
     coord._planned_run_seconds = AsyncMock(return_value=600)
 
-    [planned] = await coord.async_planning(1, trigger_start=_utc(1, 8))
-
-    assert planned["program_id"] == "main"
-    assert planned["start"] == _utc(1, 8).isoformat()
-    assert planned["schedule_id"] is None
-    assert planned["steps"]
-
-
-async def test_without_a_trigger_time_the_main_program_is_not_invented():
-    hass, coord = _status([_MAIN])
-    coord._planned_run_seconds = AsyncMock(return_value=600)
-
+    # Nothing starts it but a hand: the start trigger is not its start.
     assert await coord.async_planning(1) == []
-    # Beyond the days asked for, it is not listed either.
-    assert await coord.async_planning(1, trigger_start=_utc(5, 8)) == []
 
 
 # --- the step's minimum deficit decides, not the zone's threshold (#912) ------
@@ -263,6 +244,31 @@ def test_the_coordinator_hands_the_threshold_free_run_to_the_planner():
 
     # 15 mm at 12 mm/h is 4500 s, within the zone's maximum duration of 3600.
     assert planned[DURATION_IGNORING_THRESHOLD] == 3600
+
+
+def test_a_zone_held_by_its_days_between_gets_no_run_from_its_bucket():
+    import homeassistant.util.dt as dt_util
+
+    coord = _coordinator(
+        [zone(0, **{const.ZONE_BUCKET: -15.0, const.ZONE_IRRIGATION_THRESHOLD: 20})]
+    )
+    coord.store.get_config = lambda: {}
+    coord._seasonal_factors = lambda zone: (1.0, 0.0)
+    coord._days_held_zones = (dt_util.now().date(), {0})
+
+    [planned] = SmartIrrigationCoordinator.zones_for_programs(
+        coord, [coord.store.get_zone(0)]
+    )
+
+    # A step with a minimum deficit of its own would have watered it.
+    assert DURATION_IGNORING_THRESHOLD not in planned
+
+    # Held yesterday is not held today.
+    coord._days_held_zones = (dt_util.now().date().replace(year=2000), {0})
+    [planned] = SmartIrrigationCoordinator.zones_for_programs(
+        coord, [coord.store.get_zone(0)]
+    )
+    assert DURATION_IGNORING_THRESHOLD in planned
 
 
 # --- the planning skips what the step will skip (#971) ---------------------------

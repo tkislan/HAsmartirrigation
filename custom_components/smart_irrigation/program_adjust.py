@@ -56,16 +56,13 @@ class ProgramAdjustMixin:
         config = self.store.config
         if getattr(config, const.CONF_FULL_CONTROLLER, False) is not True:
             raise ServiceValidationError(
-                "adjust_program needs the full controller, which is off"
+                'adjust_program needs "Calculate and water", which is not chosen'
+                " in Settings, General"
             )
         program_id = str(call.data.get(const.ATTR_PROGRAM_ID))
         program = find_program(getattr(config, const.CONF_PROGRAMS, None), program_id)
         if program is None:
             raise ServiceValidationError(f"{program_id} is not a program")
-        if program.get(const.PROGRAM_MAIN):
-            raise ServiceValidationError(
-                "the main program has no steps to adjust: adjust a program with steps"
-            )
         now = dt_util.utcnow()
         adjustments = {
             k: v

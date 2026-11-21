@@ -88,7 +88,14 @@ async def test_the_planning_lists_every_start_over_the_next_days():
     first = planned[0]
     assert first["program_id"] == "evening"
     assert first["steps"][0]["zones"] == [
-        {"zone_id": 0, "zone": "Zone 0", "seconds": 300, "expected_seconds": 300}
+        {
+            "zone_id": 0,
+            "zone": "Zone 0",
+            "seconds": 300,
+            "expected_seconds": 300,
+            "passes": 1,
+            "max_litres": None,
+        }
     ]
     # Two steps of five minutes, one after the other.
     assert first["end"] == (_utc(1, 6) + timedelta(seconds=600)).isoformat()
@@ -111,6 +118,8 @@ async def test_the_planning_leaves_out_the_main_program_and_disabled_ones():
             _program([{"time": "06:00"}], enabled=False),
         ]
     )
+    # A main program without a schedule starts on its own no more.
+    coord._planned_run_seconds = AsyncMock(return_value=0)
 
     assert await coord.async_planning(3) == []
 
@@ -128,6 +137,7 @@ async def test_the_overview_gives_each_programs_state_and_next_start():
         [
             {"id": "main"},
             _program([{"time": "06:00"}]),
+            # The old "Program on" switched off: its schedules are off now.
             _program([{"time": "06:00"}], id="off", name="Off", enabled=False),
             _program([{"time": "06:00"}], id="away", name="Away"),
         ]
@@ -139,7 +149,9 @@ async def test_the_overview_gives_each_programs_state_and_next_start():
     assert overview["main"]["state"] == "idle"
     assert overview["evening"]["state"] == "idle"
     assert overview["evening"]["next_start"] == _utc(1, 6).isoformat()
-    assert overview["off"]["state"] == "disabled"
+    # No program-level "disabled": it is idle, and nothing starts it.
+    assert overview["off"]["state"] == "idle"
+    assert overview["off"]["next_start"] is None
     assert overview["away"]["state"] == "suspended"
     assert overview["away"]["suspended_until"] is not None
 

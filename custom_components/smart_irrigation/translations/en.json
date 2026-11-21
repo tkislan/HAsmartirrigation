@@ -38,19 +38,7 @@
           "waiting": "Waiting",
           "running": "Running",
           "paused": "Paused",
-          "suspended": "Suspended",
-          "disabled": "Disabled"
-        }
-      },
-      "program_main": {
-        "name": "Main program",
-        "state": {
-          "idle": "Idle",
-          "waiting": "Waiting",
-          "running": "Running",
-          "paused": "Paused",
-          "suspended": "Suspended",
-          "disabled": "Disabled"
+          "suspended": "Suspended"
         }
       }
     },
@@ -113,6 +101,12 @@
       },
       "any_problem": {
         "name": "Problem"
+      },
+      "leak": {
+        "name": "Leak"
+      },
+      "observed_watering": {
+        "name": "Observed watering"
       }
     },
     "switch": {
@@ -144,20 +138,13 @@
     }
   },
   "options": {
-    "error": {
-      "invalid_coordinates": "Invalid coordinates provided. Please check latitude (-90 to 90) and longitude (-180 to 180) values."
-    },
     "step": {
-      "coordinates": {
-        "title": "Location coordinates",
-        "description": "Configure location coordinates for weather data retrieval. You can use manual coordinates different from your Home Assistant location if needed.",
-        "data": {
-          "manual_coordinates_enabled": "Use manual coordinates instead of Home Assistant location",
-          "manual_latitude": "Latitude (decimal degrees, -90 to 90)",
-          "manual_longitude": "Longitude (decimal degrees, -180 to 180)",
-          "manual_elevation": "Elevation above sea level (meters, optional)"
-        }
+      "init": {
+        "title": "Smart Irrigation"
       }
+    },
+    "abort": {
+      "use_panel": "Smart Irrigation is set up in its own panel: open Smart Irrigation in the sidebar. The location the weather is read for is under Weather › Weather service (mode: Advanced)."
     }
   },
   "services": {
@@ -325,7 +312,7 @@
     },
     "run_program": {
       "name": "Run program",
-      "description": "Run a program of the full controller now, or as soon as it is its turn when another one is running. The program waters its zones with the durations Smart Irrigation calculated, unless its steps say otherwise.",
+      "description": "Run a program now, or as soon as it is its turn when another one is running. The program waters its zones with the durations Smart Irrigation calculated, unless its steps say otherwise.",
       "fields": {
         "program_id": {
           "name": "Program",
@@ -343,7 +330,7 @@
     },
     "stop_program": {
       "name": "Stop program",
-      "description": "Stop one program. If it is running, its open zones are closed the normal way and credited for what they delivered; if it is waiting for its turn, it is taken out of the queue. An unknown program does nothing. The main program is stopped with stop_watering.",
+      "description": "Stop one program. If it is running, its open zones are closed the normal way and credited for what they delivered; if it is waiting for its turn, it is taken out of the queue. An unknown program does nothing. All watering is stopped with stop_watering.",
       "fields": {
         "program_id": {
           "name": "Program",
@@ -352,8 +339,8 @@
       }
     },
     "set_program_enabled": {
-      "name": "Enable or disable a program",
-      "description": "Switch a program of the full controller on or off, as the switch in its settings does.",
+      "name": "Switch all schedules of a program (deprecated)",
+      "description": "Deprecated: switches every schedule of a program on or off. A program has no on/off of its own any more; use set_schedule_enabled for one schedule. Removed in 2027.11.",
       "fields": {
         "program_id": {
           "name": "Program",
@@ -421,7 +408,13 @@
     },
     "next_step": {
       "name": "Next step",
-      "description": "End the zones of the step a program is on and go on to the next step."
+      "description": "End the zones of the step a program is on and go on to the next step. Programs on supplies of their own can water side by side: without a program, every program that is running moves on.",
+      "fields": {
+        "program_id": {
+          "name": "Program",
+          "description": "The id of the program to move on; empty for every program."
+        }
+      }
     },
     "suspend": {
       "name": "Suspend",
@@ -443,7 +436,7 @@
     },
     "adjust_program": {
       "name": "Adjust a program",
-      "description": "Make a program of the full controller water longer or shorter, for a while. The adjustment replaces the previous one (it never adds up), applies to the runs that start after it is set, and ends after the hours given.",
+      "description": "Make a program water longer or shorter, for a while. The adjustment replaces the previous one (it never adds up), applies to the runs that start after it is set, and ends after the hours given.",
       "fields": {
         "program_id": {
           "name": "Program",
@@ -761,9 +754,39 @@
       "title": "The action {action} is going away",
       "description": "An automation, a script or a dashboard called **{action}**. It still works, but it will be removed from version {version} on, in winter, outside the watering season.\n\nUse **{replacement}** instead: it does the same, and for all zones when no zone is picked. This notice comes back with each call to the old name, until none is left."
     },
+    "deprecated_program_enabled": {
+      "title": "The action {action} is going away",
+      "description": "An automation, a script or a dashboard called **{action}**. A program has no on/off of its own any more, so it now switches every schedule of the program on or off. It will be removed from version {version} on, in winter, outside the watering season.\n\nUse **{replacement}** instead, once per schedule. This notice comes back with each call to the old name, until none is left."
+    },
     "deprecated_recurring_schedule": {
       "title": "Recurring schedules are going away: {action}",
       "description": "An automation, a script or a dashboard called **{action}**. Recurring schedules still work, but they will be removed from version {version} on, in winter, outside the watering season.\n\nThe programs' schedules do the same and are in the panel: set them up under **Watering**, then remove the recurring schedules and the calls to {action}."
+    },
+    "zone_set_aside": {
+      "title": "Zone {zone} is set aside",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Put zone {zone} back",
+            "description": "The valve of zone **{zone}** failed {count} runs in a row (it did not open, gave no water, or its own timer could not be set), so Smart Irrigation stopped watering it.\n\nCheck the valve, its power or batteries and its water supply. The zone comes back by itself when its valve is seen opening, for instance when you try it by hand. Or put it back now.\n\nSmart Irrigation will water zone {zone} again from its next run, and count its failures from zero."
+          }
+        }
+      }
+    },
+    "leak": {
+      "title": "Water flows with every valve closed",
+      "description": "The meter **{meter}** counted {litres} L while every valve of {zones} was closed. A pipe may leak, or a valve may be stuck open.\n\nIt clears by itself once the meter has stood still for half an hour. The event `smart_irrigation_leak` and the hub's Leak sensor let an automation close a main valve."
+    },
+    "moved_to_calculate_and_water": {
+      "title": "Direct valve control is now \"Calculate and water\"",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Your watering goes on as before",
+            "description": "Smart Irrigation now has one setting for what it does: **Calculate and water**, **Calculate only** or **Stop everything**, in the Settings tab. Your installation opened the valves itself, so it was moved to **Calculate and water**.\n\nYour zones are watered as before, at the same moment: the start trigger became a schedule of the **Watering** program, in the new **Watering** tab. Choose **Calculate only** if Smart Irrigation should no longer open the valves."
+          }
+        }
+      }
     }
   }
 }

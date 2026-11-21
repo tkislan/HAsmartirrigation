@@ -38,19 +38,7 @@
           "waiting": "Väntar",
           "running": "Körs",
           "paused": "Pausat",
-          "suspended": "Uppskjutet",
-          "disabled": "Inaktiverat"
-        }
-      },
-      "program_main": {
-        "name": "Huvudprogram",
-        "state": {
-          "idle": "Inaktivt",
-          "waiting": "Väntar",
-          "running": "Körs",
-          "paused": "Pausat",
-          "suspended": "Uppskjutet",
-          "disabled": "Inaktiverat"
+          "suspended": "Uppskjutet"
         }
       }
     },
@@ -113,6 +101,12 @@
       },
       "any_problem": {
         "name": "Problem"
+      },
+      "leak": {
+        "name": "Läckage"
+      },
+      "observed_watering": {
+        "name": "Observerad bevattning"
       }
     },
     "switch": {
@@ -144,20 +138,13 @@
     }
   },
   "options": {
-    "error": {
-      "invalid_coordinates": "Ogiltiga koordinater. Kontrollera att latituden ligger mellan -90 och 90 och longituden mellan -180 och 180."
-    },
     "step": {
-      "coordinates": {
-        "title": "Platskoordinater",
-        "description": "Ange koordinaterna för den plats som väderdata ska hämtas för. Du kan välja en annan plats än den som angetts i Home Assistant.",
-        "data": {
-          "manual_coordinates_enabled": "Ange koordinater manuellt i stället för att använda platsen i Home Assistant",
-          "manual_latitude": "Latitud (decimalgrader, -90 till 90)",
-          "manual_longitude": "Longitud (decimalgrader, -180 till 180)",
-          "manual_elevation": "Höjd över havet (meter, valfritt)"
-        }
+      "init": {
+        "title": "Smart Irrigation"
       }
+    },
+    "abort": {
+      "use_panel": "Smart Irrigation ställs in i sin egen panel: öppna Smart Irrigation i sidofältet. Platsen som vädret hämtas för finns under Väder › Vädertjänst (läge: Avancerat)."
     }
   },
   "services": {
@@ -325,7 +312,7 @@
     },
     "run_program": {
       "name": "Kör program",
-      "description": "Startar ett program i läget Fullständig bevattningsstyrning. Om ett annat program körs får programmet vänta på sin tur. Varje zon vattnas under den tid som Smart Irrigation har beräknat, om inte en annan tid anges i programsteget.",
+      "description": "Startar ett program nu. Om ett annat program körs får programmet vänta på sin tur. Varje zon vattnas under den tid som Smart Irrigation har beräknat, om inte en annan tid anges i programsteget.",
       "fields": {
         "program_id": {
           "name": "Program",
@@ -343,7 +330,7 @@
     },
     "stop_program": {
       "name": "Stoppa program",
-      "description": "Stoppar det valda programmet. Om det körs stängs ventilerna som vanligt och det vatten varje zon har fått räknas in i vattenbalansen. Om programmet väntar i kön tas det bort ur kön. Ett okänt program-id har ingen effekt. Använd stop_watering för att stoppa huvudprogrammet.",
+      "description": "Stoppar det valda programmet. Om det körs stängs ventilerna som vanligt och det vatten varje zon har fått räknas in i vattenbalansen. Om programmet väntar i kön tas det bort ur kön. Ett okänt program-id har ingen effekt. Använd stop_watering för att stoppa all bevattning.",
       "fields": {
         "program_id": {
           "name": "Program",
@@ -352,8 +339,8 @@
       }
     },
     "set_program_enabled": {
-      "name": "Aktivera eller inaktivera ett program",
-      "description": "Aktiverar eller inaktiverar ett program i läget Fullständig bevattningsstyrning. Det har samma effekt som reglaget i programmets inställningar.",
+      "name": "Slå på eller av alla scheman för ett program (föråldrad)",
+      "description": "Föråldrad: slår på eller av alla scheman för ett program. Ett program har inte längre egen på/av; använd set_schedule_enabled för ett schema. Tas bort i 2027.11.",
       "fields": {
         "program_id": {
           "name": "Program",
@@ -443,7 +430,7 @@
     },
     "adjust_program": {
       "name": "Justera ett program",
-      "description": "Förlänger eller förkortar tillfälligt bevattningstiden i ett program i läget Fullständig bevattningsstyrning. Justeringen ersätter en eventuell tidigare justering och gäller körningar som startar därefter. Den upphör efter angivet antal timmar.",
+      "description": "Förlänger eller förkortar tillfälligt bevattningstiden i ett program. Justeringen ersätter en eventuell tidigare justering och gäller körningar som startar därefter. Den upphör efter angivet antal timmar.",
       "fields": {
         "program_id": {
           "name": "Program",
@@ -761,9 +748,39 @@
       "title": "Åtgärden {action} försvinner",
       "description": "En automation, ett skript eller en instrumentpanel anropade **{action}**. Den fungerar fortfarande, men den tas bort från och med version {version}, på vintern, utanför bevattningssäsongen.\n\nAnvänd **{replacement}** i stället: den gör samma sak, och för alla zoner om ingen zon är vald. Meddelandet visas igen vid varje anrop till det gamla namnet, tills inga anrop finns kvar."
     },
+    "deprecated_program_enabled": {
+      "title": "Åtgärden {action} försvinner",
+      "description": "En automation, ett skript eller en instrumentpanel anropade **{action}**. Ett program har inte längre egen på/av, så den slår nu på eller av alla programmets scheman. Den tas bort från version {version}, på vintern, utanför bevattningssäsongen.\n\nAnvänd **{replacement}** i stället, en gång per schema. Det här meddelandet kommer tillbaka vid varje anrop av det gamla namnet, tills inga finns kvar."
+    },
     "deprecated_recurring_schedule": {
       "title": "Återkommande scheman försvinner: {action}",
       "description": "En automation, ett skript eller en instrumentpanel anropade **{action}**. Återkommande scheman fungerar fortfarande, men de tas bort från och med version {version}, på vintern, utanför bevattningssäsongen.\n\nProgrammens scheman gör samma sak och finns i panelen: konfigurera dem under **Bevattning** och ta sedan bort de återkommande schemana och anropen till {action}."
+    },
+    "zone_set_aside": {
+      "title": "Zon {zone} är ställd åt sidan",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Ta zon {zone} i bruk igen",
+            "description": "Ventilen i zon **{zone}** misslyckades {count} gånger i rad (öppnade inte, gav inget vatten, eller dess timer kunde inte ställas), så Smart Irrigation slutade vattna den.\n\nKontrollera ventilen, strömmen eller batterierna och vattentillförseln. Zonen kommer tillbaka av sig själv när ventilen ses öppna, till exempel provad för hand. Eller ta den i bruk nu.\n\nSmart Irrigation vattnar zon {zone} igen från nästa bevattning och räknar misslyckandena från noll."
+          }
+        }
+      }
+    },
+    "leak": {
+      "title": "Vatten rinner med alla ventiler stängda",
+      "description": "Mätaren **{meter}** räknade {litres} L medan alla ventiler i {zones} var stängda. Ett rör kan läcka eller en ventil ha fastnat öppen.\n\nMeddelandet försvinner av sig självt när mätaren stått still en halvtimme. Händelsen `smart_irrigation_leak` och Läckage-sensorn låter en automation stänga en huvudventil."
+    },
+    "moved_to_calculate_and_water": {
+      "title": "Direkt ventilstyrning heter nu ”Beräkna och vattna”",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Din bevattning fortsätter som förut",
+            "description": "Smart Irrigation har nu en enda inställning för vad det gör: **Beräkna och vattna**, **Bara beräkna** eller **Stoppa allt**, på fliken Inställningar. Din installation öppnade ventilerna själv och har därför flyttats till **Beräkna och vattna**.\n\nDina zoner vattnas som förut, vid samma tidpunkt: startutlösaren har blivit ett schema för programmet **Bevattning** på den nya fliken **Bevattning**. Välj **Bara beräkna** om Smart Irrigation inte längre ska öppna ventilerna."
+          }
+        }
+      }
     }
   }
 }

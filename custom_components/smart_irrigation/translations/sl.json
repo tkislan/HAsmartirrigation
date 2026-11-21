@@ -38,19 +38,7 @@
           "waiting": "Čaka",
           "running": "Teče",
           "paused": "Začasno ustavljeno",
-          "suspended": "Zadržano",
-          "disabled": "Izklopljeno"
-        }
-      },
-      "program_main": {
-        "name": "Glavni program",
-        "state": {
-          "idle": "Nedejavno",
-          "waiting": "Čaka",
-          "running": "Teče",
-          "paused": "Začasno ustavljeno",
-          "suspended": "Zadržano",
-          "disabled": "Izklopljeno"
+          "suspended": "Zadržano"
         }
       }
     },
@@ -113,6 +101,12 @@
       },
       "any_problem": {
         "name": "Težava"
+      },
+      "leak": {
+        "name": "Puščanje"
+      },
+      "observed_watering": {
+        "name": "Opazovano zalivanje"
       }
     },
     "switch": {
@@ -144,20 +138,13 @@
     }
   },
   "options": {
-    "error": {
-      "invalid_coordinates": "Neveljavne koordinate. Preveri zemljepisno širino (-90 do 90) in dolžino (-180 do 180)."
-    },
     "step": {
-      "coordinates": {
-        "title": "Koordinate lokacije",
-        "description": "Nastavi koordinate lokacije za pridobivanje vremenskih podatkov. Po potrebi lahko uporabiš ročne koordinate, ki se razlikujejo od lokacije v Home Assistant.",
-        "data": {
-          "manual_coordinates_enabled": "Uporabi ročne koordinate namesto lokacije Home Assistant",
-          "manual_latitude": "Zemljepisna širina (decimalne stopinje, -90 do 90)",
-          "manual_longitude": "Zemljepisna dolžina (decimalne stopinje, -180 do 180)",
-          "manual_elevation": "Nadmorska višina (metri, neobvezno)"
-        }
+      "init": {
+        "title": "Smart Irrigation"
       }
+    },
+    "abort": {
+      "use_panel": "Smart Irrigation se nastavi v lastni plošči: odprite Smart Irrigation v stranski vrstici. Lokacija, za katero se bere vreme, je v Vreme › Vremenska storitev (način: Napredno)."
     }
   },
   "services": {
@@ -325,7 +312,7 @@
     },
     "run_program": {
       "name": "Zaženi program",
-      "description": "Zaženi program celotnega krmilnika zdaj ali, če teče drug, takoj ko pride na vrsto. Program zaliva svoje cone s trajanji, ki jih je izračunal Smart Irrigation, razen če njegovi koraki določajo drugače.",
+      "description": "Zaženi program zdaj ali, če teče drug, takoj ko pride na vrsto. Program zaliva svoje cone s trajanji, ki jih je izračunal Smart Irrigation, razen če njegovi koraki določajo drugače.",
       "fields": {
         "program_id": {
           "name": "Program",
@@ -343,7 +330,7 @@
     },
     "stop_program": {
       "name": "Ustavi program",
-      "description": "Ustavi en program. Če teče, se njegove odprte cone zaprejo na običajen način in se jim prišteje dovedena voda; če čaka, da pride na vrsto, se odstrani iz vrste. Neznan program ne naredi ničesar. Glavni program ustaviš s stop_watering.",
+      "description": "Ustavi en program. Če teče, se njegove odprte cone zaprejo na običajen način in se jim prišteje dovedena voda; če čaka, da pride na vrsto, se odstrani iz vrste. Neznan program ne naredi ničesar. Vse zalivanje ustaviš s stop_watering.",
       "fields": {
         "program_id": {
           "name": "Program",
@@ -352,8 +339,8 @@
       }
     },
     "set_program_enabled": {
-      "name": "Vklopi ali izklopi program",
-      "description": "Vklopi ali izklopi program celotnega krmilnika, kot to stori stikalo v njegovih nastavitvah.",
+      "name": "Vklopi ali izklopi vse urnike programa (zastarelo)",
+      "description": "Zastarelo: vklopi ali izklopi vse urnike programa. Program nima več lastnega stikala; za en urnik uporabi set_schedule_enabled. Odstranjeno v 2027.11.",
       "fields": {
         "program_id": {
           "name": "Program",
@@ -443,7 +430,7 @@
     },
     "adjust_program": {
       "name": "Prilagodi program",
-      "description": "Za nekaj časa naj program celotnega krmilnika zaliva dlje ali krajše. Prilagoditev nadomesti prejšnjo (nikoli se ne sešteva), velja za zagone, ki se začnejo po njeni nastavitvi, in se konča po podanih urah.",
+      "description": "Za nekaj časa naj program zaliva dlje ali krajše. Prilagoditev nadomesti prejšnjo (nikoli se ne sešteva), velja za zagone, ki se začnejo po njeni nastavitvi, in se konča po podanih urah.",
       "fields": {
         "program_id": {
           "name": "Program",
@@ -761,9 +748,39 @@
       "title": "Dejanje {action} bo odstranjeno",
       "description": "Avtomatizacija, skripta ali nadzorna plošča je poklicala **{action}**. Še vedno deluje, a bo odstranjeno od različice {version} naprej, pozimi, zunaj sezone zalivanja.\n\nNamesto tega uporabi **{replacement}**: naredi isto, in to za vse cone, ko nobena cona ni izbrana. To obvestilo se vrne ob vsakem klicu starega imena, dokler ne ostane noben."
     },
+    "deprecated_program_enabled": {
+      "title": "Dejanje {action} bo odstranjeno",
+      "description": "Avtomatizacija, skript ali nadzorna plošča je poklicala **{action}**. Program nima več lastnega stikala, zato zdaj vklopi ali izklopi vse urnike programa. Odstranjeno bo od različice {version}, pozimi, zunaj sezone zalivanja.\n\nNamesto tega uporabi **{replacement}**, enkrat za vsak urnik. To obvestilo se vrne ob vsakem klicu starega imena, dokler ne ostane noben."
+    },
     "deprecated_recurring_schedule": {
       "title": "Ponavljajoči se urniki bodo odstranjeni: {action}",
       "description": "Avtomatizacija, skripta ali nadzorna plošča je poklicala **{action}**. Ponavljajoči se urniki še vedno delujejo, a bodo odstranjeni od različice {version} naprej, pozimi, zunaj sezone zalivanja.\n\nUrniki programov naredijo isto in so na plošči: nastavi jih na zavihku **Zalivanje**, nato odstrani ponavljajoče se urnike in klice {action}."
+    },
+    "zone_set_aside": {
+      "title": "Območje {zone} je odloženo",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Vrni območje {zone} v uporabo",
+            "description": "Ventil območja **{zone}** je odpovedal {count}-krat zapored (ni se odprl, ni dal vode, ali mu ni bilo mogoče nastaviti časovnika), zato ga Smart Irrigation ne zaliva več.\n\nPreverite ventil, napajanje ali baterije in dovod vode. Območje se vrne samo, ko se njegov ventil odpre, na primer ročno preizkušen. Ali ga vrnite zdaj.\n\nSmart Irrigation bo območje {zone} spet zalival od naslednjega zalivanja in neuspehe štel od nič."
+          }
+        }
+      }
+    },
+    "leak": {
+      "title": "Voda teče ob zaprtih ventilih",
+      "description": "Vodomer **{meter}** je naštel {litres} L, ko so bili vsi ventili {zones} zaprti. Morda pušča cev ali se je ventil zataknil odprt.\n\nOpozorilo izgine samo, ko vodomer pol ure miruje. Dogodek `smart_irrigation_leak` in senzor Puščanje omogočata avtomatizaciji, da zapre glavni ventil."
+    },
+    "moved_to_calculate_and_water": {
+      "title": "Neposredno krmiljenje ventilov je zdaj »Računaj in zalivaj«",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Vaše zalivanje teče kot prej",
+            "description": "Smart Irrigation ima zdaj eno samo nastavitev za to, kar počne: **Računaj in zalivaj**, **Samo računaj** ali **Ustavi vse**, na zavihku Nastavitve. Vaša namestitev je sama odpirala ventile, zato je bila preklopljena na **Računaj in zalivaj**.\n\nVaša območja se zalivajo kot prej, ob istem času: sprožilec začetka je postal urnik programa **Zalivanje** na novem zavihku **Zalivanje**. Izberite **Samo računaj**, če Smart Irrigation ne sme več odpirati ventilov."
+          }
+        }
+      }
     }
   }
 }

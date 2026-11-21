@@ -38,19 +38,7 @@
           "waiting": "Oczekuje",
           "running": "Działa",
           "paused": "Wstrzymany",
-          "suspended": "Zawieszony",
-          "disabled": "Wyłączony"
-        }
-      },
-      "program_main": {
-        "name": "Program główny",
-        "state": {
-          "idle": "Bezczynny",
-          "waiting": "Oczekuje",
-          "running": "Działa",
-          "paused": "Wstrzymany",
-          "suspended": "Zawieszony",
-          "disabled": "Wyłączony"
+          "suspended": "Zawieszony"
         }
       }
     },
@@ -113,6 +101,12 @@
       },
       "any_problem": {
         "name": "Problem"
+      },
+      "leak": {
+        "name": "Wyciek"
+      },
+      "observed_watering": {
+        "name": "Obserwowane podlewanie"
       }
     },
     "switch": {
@@ -144,20 +138,13 @@
     }
   },
   "options": {
-    "error": {
-      "invalid_coordinates": "Podano nieprawidłowe współrzędne. Sprawdź wartości szerokości geograficznej (-90 do 90) i długości geograficznej (-180 do 180)."
-    },
     "step": {
-      "coordinates": {
-        "title": "Współrzędne lokalizacji",
-        "description": "Skonfiguruj współrzędne lokalizacji na potrzeby pobierania danych pogodowych. W razie potrzeby możesz użyć ręcznych współrzędnych różnych od lokalizacji Home Assistant.",
-        "data": {
-          "manual_coordinates_enabled": "Użyj ręcznych współrzędnych zamiast lokalizacji Home Assistant",
-          "manual_latitude": "Szerokość geograficzna (stopnie dziesiętne, -90 do 90)",
-          "manual_longitude": "Długość geograficzna (stopnie dziesiętne, -180 do 180)",
-          "manual_elevation": "Wysokość nad poziomem morza (metry, opcjonalnie)"
-        }
+      "init": {
+        "title": "Smart Irrigation"
       }
+    },
+    "abort": {
+      "use_panel": "Smart Irrigation konfiguruje się we własnym panelu: otwórz Smart Irrigation na pasku bocznym. Lokalizacja, dla której pobierana jest pogoda, jest w Pogoda › Usługa pogodowa (tryb: Zaawansowany)."
     }
   },
   "services": {
@@ -325,7 +312,7 @@
     },
     "run_program": {
       "name": "Uruchom program",
-      "description": "Uruchom program pełnego kontrolera teraz albo gdy przyjdzie jego kolej, jeśli działa inny. Program podlewa swoje strefy czasami obliczonymi przez Smart Irrigation, chyba że jego kroki mówią inaczej.",
+      "description": "Uruchom program teraz albo gdy przyjdzie jego kolej, jeśli działa inny. Program podlewa swoje strefy czasami obliczonymi przez Smart Irrigation, chyba że jego kroki mówią inaczej.",
       "fields": {
         "program_id": {
           "name": "Program",
@@ -343,7 +330,7 @@
     },
     "stop_program": {
       "name": "Zatrzymaj program",
-      "description": "Zatrzymaj jeden program. Jeśli działa, jego otwarte strefy zostają zamknięte w zwykły sposób i zaliczone za to, co dostarczyły; jeśli czeka na swoją kolej, zostaje usunięty z kolejki. Nieznany program nic nie robi. Program główny zatrzymuje się przez stop_watering.",
+      "description": "Zatrzymaj jeden program. Jeśli działa, jego otwarte strefy zostają zamknięte w zwykły sposób i zaliczone za to, co dostarczyły; jeśli czeka na swoją kolej, zostaje usunięty z kolejki. Nieznany program nic nie robi. Całe podlewanie zatrzymuje się przez stop_watering.",
       "fields": {
         "program_id": {
           "name": "Program",
@@ -352,8 +339,8 @@
       }
     },
     "set_program_enabled": {
-      "name": "Włącz lub wyłącz program",
-      "description": "Włącz lub wyłącz program pełnego kontrolera, tak jak przełącznik w jego ustawieniach.",
+      "name": "Włącz lub wyłącz wszystkie harmonogramy programu (przestarzała)",
+      "description": "Przestarzała: włącza lub wyłącza wszystkie harmonogramy programu. Program nie ma już własnego włącznika; dla jednego harmonogramu użyj set_schedule_enabled. Zostanie usunięta w 2027.11.",
       "fields": {
         "program_id": {
           "name": "Program",
@@ -443,7 +430,7 @@
     },
     "adjust_program": {
       "name": "Dostosuj program",
-      "description": "Spraw, aby program pełnego kontrolera przez pewien czas podlewał dłużej lub krócej. Korekta zastępuje poprzednią (nigdy się nie sumuje), dotyczy uruchomień rozpoczętych po jej ustawieniu i kończy się po podanych godzinach.",
+      "description": "Spraw, aby program przez pewien czas podlewał dłużej lub krócej. Korekta zastępuje poprzednią (nigdy się nie sumuje), dotyczy uruchomień rozpoczętych po jej ustawieniu i kończy się po podanych godzinach.",
       "fields": {
         "program_id": {
           "name": "Program",
@@ -761,9 +748,39 @@
       "title": "Akcja {action} zostanie usunięta",
       "description": "Automatyzacja, skrypt lub dashboard wywołał **{action}**. Nadal działa, ale zostanie usunięta od wersji {version}, zimą, poza sezonem podlewania.\n\nUżyj zamiast niej **{replacement}**: robi to samo, a dla wszystkich stref, gdy żadna nie jest wybrana. To powiadomienie wraca przy każdym wywołaniu starej nazwy, dopóki żadne nie zostanie."
     },
+    "deprecated_program_enabled": {
+      "title": "Akcja {action} zniknie",
+      "description": "Automatyzacja, skrypt lub pulpit wywołał **{action}**. Program nie ma już własnego włącznika, więc akcja włącza lub wyłącza teraz wszystkie harmonogramy programu. Zostanie usunięta od wersji {version}, zimą, poza sezonem podlewania.\n\nUżyj zamiast niej **{replacement}**, raz dla każdego harmonogramu. To powiadomienie wraca przy każdym wywołaniu starej nazwy, dopóki żadne nie zostanie."
+    },
     "deprecated_recurring_schedule": {
       "title": "Harmonogramy cykliczne zostaną usunięte: {action}",
       "description": "Automatyzacja, skrypt lub dashboard wywołał **{action}**. Harmonogramy cykliczne nadal działają, ale zostaną usunięte od wersji {version}, zimą, poza sezonem podlewania.\n\nHarmonogramy programów robią to samo i są w panelu: skonfiguruj je w zakładce **Podlewanie**, a potem usuń harmonogramy cykliczne i wywołania {action}."
+    },
+    "zone_set_aside": {
+      "title": "Strefa {zone} jest odłożona",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Przywróć strefę {zone}",
+            "description": "Zawór strefy **{zone}** zawiódł {count} razy z rzędu (nie otworzył się, nie dał wody lub nie dało się ustawić jego timera), więc Smart Irrigation przestał ją podlewać.\n\nSprawdź zawór, jego zasilanie lub baterie i doprowadzenie wody. Strefa wraca sama, gdy jej zawór się otworzy, np. sprawdzony ręcznie. Albo przywróć ją teraz.\n\nSmart Irrigation znów będzie podlewać strefę {zone} od następnego podlewania i zacznie liczyć niepowodzenia od zera."
+          }
+        }
+      }
+    },
+    "leak": {
+      "title": "Woda płynie przy zamkniętych zaworach",
+      "description": "Licznik **{meter}** naliczył {litres} l, gdy wszystkie zawory {zones} były zamknięte. Rura może przeciekać albo zawór utknął otwarty.\n\nAlarm znika sam, gdy licznik stoi przez pół godziny. Zdarzenie `smart_irrigation_leak` i czujnik Wyciek pozwalają automatyzacji zamknąć zawór główny."
+    },
+    "moved_to_calculate_and_water": {
+      "title": "Bezpośrednie sterowanie zaworami to teraz „Obliczaj i podlewaj”",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Twoje podlewanie działa jak dotąd",
+            "description": "Smart Irrigation ma teraz jedno ustawienie określające, co robi: **Obliczaj i podlewaj**, **Tylko obliczaj** lub **Zatrzymaj wszystko**, na karcie Ustawienia. Twoja instalacja sama otwierała zawory, więc przełączono ją na **Obliczaj i podlewaj**.\n\nTwoje strefy są podlewane jak dotąd, o tej samej porze: wyzwalacz startu stał się harmonogramem programu **Podlewanie** na nowej karcie **Podlewanie**. Wybierz **Tylko obliczaj**, jeśli Smart Irrigation nie ma już otwierać zaworów."
+          }
+        }
+      }
     }
   }
 }

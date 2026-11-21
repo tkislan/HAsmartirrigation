@@ -1,6 +1,6 @@
 """Store constants."""
 
-VERSION = "v2026.11.0"
+VERSION = "v2026.11.1-beta1"
 NAME = "Smart Irrigation"
 MANUFACTURER = "@altmenorg"
 
@@ -108,6 +108,10 @@ CONF_DEFAULT_FULL_CONTROLLER = False
 # bucket as it is, opens no valve and runs no program (see master_switch.py).
 CONF_IRRIGATION_ENABLED = "irrigation_enabled"
 CONF_DEFAULT_IRRIGATION_ENABLED = True
+# Off with the master switch on: Smart Irrigation calculates and keeps every
+# balance and duration current, but starts no watering (master_switch.py).
+CONF_WATERING_ENABLED = "watering_enabled"
+CONF_DEFAULT_WATERING_ENABLED = True
 # The programs of the full controller: an ordered list of dicts (see programs.py).
 CONF_PROGRAMS = "programs"
 CONF_DEFAULT_PROGRAMS = []
@@ -167,6 +171,10 @@ OWED_RESUME_MAX_AGE_SECONDS = 30 * 3600
 CONF_QUEUED_MANUAL_RUNS = "queued_manual_runs"
 # A queued run older than this is dropped at startup (it is not wanted any more).
 QUEUED_RUN_MAX_AGE_SECONDS = 6 * 3600
+# The starts of "after a program" schedules waiting for their offset, kept so a
+# restart does not lose them: [{"program_id": "b", "schedule_id": "schedule_1",
+# "after_program": "a", "due": iso}].
+CONF_PENDING_CHAINED_STARTS = "pending_chained_starts"
 # A runtime adjustment of the duration of a program, set by the adjust_program
 # service: {"evening": {"percent": 120.0, "seconds": None, "until": iso}}. Kept
 # apart from the programs, which the panel sends back whole.
@@ -179,6 +187,18 @@ ATTR_RESET = "reset"
 # What is suspended until when: {"zone:3": iso, "program:evening": iso}. Kept apart
 # from the zones and the programs, which the panel sends back whole.
 CONF_SUSPENSIONS = "suspensions"
+# Failed runs in a row before a zone is set aside (set_aside.py); 0: never.
+CONF_SET_ASIDE_AFTER = "set_aside_after"
+CONF_DEFAULT_SET_ASIDE_AFTER = 0
+SET_ASIDE_AFTER_MAX = 10
+# Each zone's failed runs in a row, and since when it is set aside:
+# {"3": {"count": 2, "reason": "no_flow", "set_aside": iso}}.
+CONF_ZONE_FAILURES = "zone_failures"
+# Litres a meter may count with every valve closed before a leak is told;
+# 0: not watched (leak_watch.py).
+CONF_LEAK_ALERT_LITRES = "leak_alert_litres"
+CONF_DEFAULT_LEAK_ALERT_LITRES = 0
+LEAK_ALERT_LITRES_MAX = 1000
 # What the last import of an Irrigation Unlimited configuration created, so that
 # the next one updates it: {"zones": {"c1_z2": 7}, "programs": [...], "supplies":
 # [...], "source": "yaml", "at": iso}. See iu_import_ha.py.
@@ -189,6 +209,11 @@ CONF_LAST_ZONE_ID = "last_zone_id"
 # forces it on), so that switching the controller off puts it back. None when the
 # controller was never switched on, or the value was already used.
 CONF_DIRECT_VALVE_BEFORE_FULL_CONTROLLER = "direct_valve_control_before_full_controller"
+# Set once the installation was moved to the one choice of 2026.11 (one_choice.py).
+CONF_ONE_CHOICE_MIGRATED = "one_choice_migrated"
+# Set once the main program was converted into an ordinary program with steps,
+# and the program-level "Program on" into its schedules (program_migration.py).
+CONF_MAIN_PROGRAM_CONVERTED = "main_program_converted"
 SUSPEND_ZONE = "zone"
 SUSPEND_PROGRAM = "program"
 # A cycle older than this is not resumed: it belongs to another day's watering.
@@ -204,6 +229,9 @@ RUN_DELIVERED = "delivered"
 # Keys inside a program of the full controller (see programs.py).
 PROGRAM_ID = "id"
 PROGRAM_NAME = "name"
+# Read from old stores only, by the conversion of the main program and of the
+# program-level on/off: no program carries them any more.
+# deprecated: remove in 2027.11
 PROGRAM_ENABLED = "enabled"
 PROGRAM_MAIN = "main"
 PROGRAM_STEPS = "steps"
@@ -212,6 +240,16 @@ PROGRAM_DELAY = "delay"
 # The whole list watered this many times, each with its share of the water.
 PROGRAM_TOURS = "tours"
 PROGRAM_SCHEDULES = "schedules"
+# Whom a program tells when it has watered (see program_notify.py): stored
+# only when it names a target.
+PROGRAM_NOTIFY = "notify"
+NOTIFY_TARGETS = "targets"
+NOTIFY_WHEN = "when"
+NOTIFY_WHEN_FINISH = "finish"
+NOTIFY_WHEN_PROBLEMS = "problems"
+NOTIFY_WHEN_CHOICES = (NOTIFY_WHEN_FINISH, NOTIFY_WHEN_PROBLEMS)
+NOTIFY_START = "start"
+NOTIFY_PERSISTENT = "persistent_notification"
 # Keys inside a step of a program (see programs.py).
 STEP_ID = "id"
 STEP_ZONES = "zones"
@@ -240,6 +278,9 @@ SCHEDULE_ENABLED = "enabled"
 SCHEDULE_TYPE = "type"
 SCHEDULE_TIME = "time"
 SCHEDULE_EVENT = "event"
+# With the event "azimuth": the sun's bearing, in degrees clockwise from north,
+# at which the schedule starts (or ends).
+SCHEDULE_AZIMUTH = "azimuth"
 SCHEDULE_OFFSET_MINUTES = "offset_minutes"
 SCHEDULE_ANCHOR = "anchor"
 SCHEDULE_WEEKDAYS = "weekdays"
@@ -267,8 +308,20 @@ SKIP_CONDITION_IDS = (
 )
 # The user's own "not now": it applies whenever the weather is taken into account.
 SKIP_CONDITION_ALWAYS = "postponed"
+# The conditions that are a statement about the day: decided at the first start
+# of the day and kept for every later start that day (a run in the morning
+# resets the days since the last irrigation, and must not hold back the evening
+# run for it). The others are readings of the moment (the postponement ends at
+# a moment, a frost at 06:00 is gone at 18:00), judged again at each start.
+SKIP_CONDITIONS_OF_THE_DAY = ("precipitation", "days_between")
+SKIP_CONDITIONS_OF_THE_MOMENT = tuple(
+    c for c in SKIP_CONDITION_IDS if c not in SKIP_CONDITIONS_OF_THE_DAY
+)
 # An end-anchored schedule whose finish is a hard limit: the run is cut there.
 SCHEDULE_HARD_DEADLINE = "hard_deadline"
+# A schedule of the type "after" starts its program when another program has
+# really watered and finished: the id of that program (see schedules.py).
+SCHEDULE_AFTER_PROGRAM = "after_program"
 # Why a run was cut short, in the program_finished event and the log.
 CUT_REASON_DEADLINE = "deadline"
 # Keys inside a supply of the full controller (see supplies.py).
@@ -683,6 +736,11 @@ ZONE_EXTRA_ENTITIES = "extra_entities"
 # single-channel device, "state_l1".."state_l4" for a multi-channel one.
 ZONE_SAFETY_OFF_STATE_KEY = "safety_off_state_key"
 CONF_DEFAULT_SAFETY_OFF_STATE_KEY = "state"
+# A number entity holding how long the zone's valve stays open once opened, for
+# a valve that closes by itself after its own duration (Gardena): the run's
+# length, plus the margin below, is written to it before each open. Without it
+# such a valve closes after its preset (1 min by default) in a 40 min run.
+ZONE_SAFETY_OFF_ENTITY = "safety_off_entity"
 # Seconds added to a pass's own length for the on_time value, so the device's
 # own auto-off lands just after Home Assistant's close rather than before it.
 SAFETY_OFF_TIME_MARGIN = 30
@@ -697,6 +755,11 @@ SAFETY_OFF_MODE_OFF = "off"
 # differs between devices.
 SAFETY_OFF_MODE_ZHA = "zha"
 SAFETY_OFF_MODES = (SAFETY_OFF_MODE_AUTO, SAFETY_OFF_MODE_OFF, SAFETY_OFF_MODE_ZHA)
+# A zone that would rather skip a watering than open its valve without the
+# valve's own timer (#893): when none of the ways of setting it succeeds, the
+# valve stays shut, or is shut at once, and the zone reports
+# ``valve_timer_not_set``. Off by default: the valve then opens all the same.
+ZONE_SAFETY_OFF_REQUIRED = "safety_off_required"
 # How long this zone's valves are given to say they opened or closed, in
 # seconds, and how many times the open is sent again in that time. None keeps
 # the runner's defaults: 8 s and no resend, or 30 s and two resends with the
@@ -720,6 +783,11 @@ ZHA_SECONDS_VALVES = (("SONOFF", "SWV"),)
 ZHA_MAX_ON_TIME = 0xFFFF
 # Optional cumulative volume/flow meter; credits the bucket by measured volume.
 ZONE_FLOW_SENSOR = "flow_sensor"
+# Observed watering: a run of the valve that lasts this many seconds or less is
+# not credited (a short cooling mist mostly stays on the leaves and
+# evaporates); a longer one counts in full. None credits every run.
+ZONE_OBSERVED_IGNORE_SECONDS = "observed_ignore_seconds"
+OBSERVED_IGNORE_SECONDS_MAX = 3600
 # A soil moisture sensor, in %, and the moisture at or above which the zone
 # sits out a run: the soil already holds what the bucket says it lacks.
 ZONE_SOIL_MOISTURE_SENSOR = "soil_moisture_sensor"
@@ -754,6 +822,9 @@ HISTORY_ZONE_ID = "zone_id"
 HISTORY_ZONE_NAME = "zone_name"
 HISTORY_DURATION = "duration"
 HISTORY_WATER_USED = "water_used"
+# What started the run: a program's id ("main" for the old main program too),
+# "manual", or none (watered from outside, or before this was kept).
+HISTORY_PROGRAM_ID = "program_id"
 # Older runs are pruned whenever a new one is recorded. The panel charts a
 # month, so a quarter of history covers it with room to look further back while
 # keeping the storage file small. The entry cap is a second guard for setups
@@ -949,6 +1020,8 @@ EVENT_IRRIGATE_FINISHED = "irrigation_finished"
 # Fired (as smart_irrigation_zone_problem) when a direct-control valve fails to
 # open, so users can wire a notification automation.
 EVENT_ZONE_PROBLEM = "zone_problem"
+# Water counted by a zone's meter with every valve closed (leak_watch.py).
+EVENT_LEAK = "leak"
 # A supply (pump or main valve) that did not do what it was told.
 EVENT_SUPPLY_PROBLEM = "supply_problem"
 # Every switch of a valve or a supply by the full controller.

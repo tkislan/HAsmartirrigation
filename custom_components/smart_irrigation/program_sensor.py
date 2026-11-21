@@ -5,16 +5,18 @@ that is added gets its sensor, one that is deleted loses it. Each sensor reads
 what the coordinator publishes (program_status.py) when something changes, so it
 is never polled.
 
-The state is one of idle, waiting, running, paused, suspended or disabled. The
+The state is one of idle, waiting, running, paused or suspended. The
 next start, the last run, the length of the suspension and, while it runs, the
 step it is on and how far along it is, are attributes.
 
-The name and the states come from the translations: in German the main
-program's sensor was "Smart Irrigation Program Main program", reading "idle".
-The entity ID stays the English one it always had.
+The name and the states come from the translations: in German a program's
+sensor is "Smart Irrigation Programm <name>", reading "Bereit". The entity ID
+stays the one it was given, the old main program's included.
 """
 
 import logging
+from collections.abc import Callable
+from typing import Any
 
 from homeassistant.components.sensor import DOMAIN as PLATFORM
 from homeassistant.components.sensor import SensorEntity
@@ -36,7 +38,6 @@ _ICONS = {
     "running": "mdi:sprinkler-variant",
     "paused": "mdi:pause-circle",
     "suspended": "mdi:calendar-remove",
-    "disabled": "mdi:calendar-blank",
 }
 
 
@@ -53,11 +54,8 @@ class SmartIrrigationProgramSensor(SensorEntity):
         self.entity_id = (
             f"{PLATFORM}.{const.DOMAIN}_program_{slugify(self._program_id)}"
         )
-        # The main program has one name, which the panel does not let anyone
-        # change; another program is "Program <its name>".
-        self._attr_translation_key = (
-            "program_main" if overview.get("main") else "program"
-        )
+        # "Program <its name>", whichever program it is.
+        self._attr_translation_key = "program"
         self._attr_translation_placeholders = self._placeholders(overview)
 
     def _placeholders(self, overview: dict) -> dict[str, str]:
@@ -84,7 +82,6 @@ class SmartIrrigationProgramSensor(SensorEntity):
         overview = self._overview
         attributes = {
             "program_id": self._program_id,
-            "main": overview.get("main"),
             "next_start": overview.get("next_start"),
             "last_run": overview.get("last_run"),
             "suspended_until": overview.get("suspended_until"),
@@ -120,12 +117,21 @@ class SmartIrrigationProgramSensor(SensorEntity):
             self.async_write_ha_state()
 
 
-async def async_setup_program_sensors(
+async def async_follow_programs(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
     async_add_devices: AddEntitiesCallback,
+    registered_key: str,
+    create: Callable[[HomeAssistant, dict], Any],
+    wanted: Callable[[dict], bool] = lambda item: True,
 ) -> None:
-    """Keep one sensor per program, following the programs as they change."""
+    """Keep one entity per program, following the programs as they change.
+
+    ``create`` makes the entity of a program from its overview; an entity it
+    made is handed every later overview through ``set_overview``. ``wanted``
+    says which programs get one. A program that goes, or stops being wanted,
+    loses its entity.
+    """
 
     # Refreshes overlap (a save asks for several), and one that began earlier
     # can end later: it would put back what was true before. Only a refresh
@@ -146,29 +152,27 @@ async def async_setup_program_sensors(
         if mine < order["shown"]:
             return
         order["shown"] = mine
-        registered = hass.data[const.DOMAIN].setdefault("program_sensors", {})
-        wanted = {item["program_id"]: item for item in overview}
+        registered = hass.data[const.DOMAIN].setdefault(registered_key, {})
+        kept = {item["program_id"]: item for item in overview if wanted(item)}
         added = []
-        for program_id, item in wanted.items():
+        for program_id, item in kept.items():
             entity = registered.get(program_id)
             if entity is None:
-                entity = registered[program_id] = SmartIrrigationProgramSensor(
-                    hass, item
-                )
+                entity = registered[program_id] = create(hass, item)
                 added.append(entity)
             else:
                 entity.set_overview(item)
         if added:
             async_add_devices(added)
-        for program_id in [p for p in registered if p not in wanted]:
+        for program_id in [p for p in registered if p not in kept]:
             entity = registered.pop(program_id)
             registry = er.async_get(hass)
             if entity.entity_id and registry.async_get(entity.entity_id):
                 registry.async_remove(entity.entity_id)
 
-    # A reload sets the platform up again: the sensors of the entry that was
+    # A reload sets the platform up again: the entities of the entry that was
     # unloaded are gone with it and must be added again, not updated.
-    hass.data.setdefault(const.DOMAIN, {})["program_sensors"] = {}
+    hass.data.setdefault(const.DOMAIN, {})[registered_key] = {}
 
     @callback
     def _changed() -> None:
@@ -178,3 +182,18 @@ async def async_setup_program_sensors(
         async_dispatcher_connect(hass, const.DOMAIN + "_programs_updated", _changed)
     )
     await _sync()
+
+
+async def async_setup_program_sensors(
+    hass: HomeAssistant,
+    config_entry: ConfigEntry,
+    async_add_devices: AddEntitiesCallback,
+) -> None:
+    """Keep one sensor per program, following the programs as they change."""
+    await async_follow_programs(
+        hass,
+        config_entry,
+        async_add_devices,
+        "program_sensors",
+        SmartIrrigationProgramSensor,
+    )

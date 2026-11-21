@@ -1,4 +1,4 @@
-"""Switch platform for Smart Irrigation: the global weather-based skip toggle.
+"""Switch platform for Smart Irrigation: the hub's switches.
 
 Exposes the panel's "Weather-based Irrigation Skip" setting as a switch on
 the hub device, so it can be controlled from automations and dashboards, not
@@ -14,6 +14,7 @@ from homeassistant.components.switch import DOMAIN as SWITCH_PLATFORM
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import (
     async_dispatcher_connect,
     async_dispatcher_send,
@@ -40,13 +41,33 @@ async def async_setup_entry(
     config_entry: ConfigEntry,
     async_add_devices: AddEntitiesCallback,
 ) -> None:
-    """Set up the hub's switches: the master switch and the weather-based skip."""
+    """Set up the hub's two switches."""
     async_add_devices(
         [
             SmartIrrigationEnabledSwitch(hass),
             SmartIrrigationSkipOnPrecipitationSwitch(hass),
         ]
     )
+    _remove_program_switches(hass, config_entry)
+
+
+def _remove_program_switches(hass: HomeAssistant, config_entry: ConfigEntry) -> None:
+    """Take the old "Program on" switches out of the entity registry.
+
+    A program has no on/off of its own any more (its schedules are switched
+    instead), and a switch left in the registry would stay "unavailable" for
+    ever. deprecated: remove in 2027.11
+    """
+    registry = er.async_get(hass)
+    prefix, suffix = f"{const.DOMAIN}_program_", "_enabled"
+    for entry in er.async_entries_for_config_entry(registry, config_entry.entry_id):
+        unique_id = str(entry.unique_id or "")
+        if (
+            entry.domain == SWITCH_PLATFORM
+            and unique_id.startswith(prefix)
+            and unique_id.endswith(suffix)
+        ):
+            registry.async_remove(entry.entity_id)
 
 
 class SmartIrrigationSkipOnPrecipitationSwitch(SwitchEntity):
@@ -55,7 +76,7 @@ class SmartIrrigationSkipOnPrecipitationSwitch(SwitchEntity):
     _attr_has_entity_name = True
     _attr_should_poll = False
     _attr_translation_key = "skip_on_precipitation"
-    # A setting of the Skip on weather page: listed under Configuration.
+    # A setting of the Weather > Skip watering page: listed under Configuration.
     _attr_entity_category = EntityCategory.CONFIG
     _attr_icon = "mdi:weather-pouring"
     # The setting it stands for, and its value when it was never set.

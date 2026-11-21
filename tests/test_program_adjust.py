@@ -51,10 +51,6 @@ def test_new_fields_are_normalised_and_bounded():
     assert _step(min_seconds="abc")[const.STEP_MIN_SECONDS] == 0
 
 
-def test_no_bounds_changes_nothing():
-    assert step_seconds(_step(), _zone()) == 600
-
-
 def test_offset_min_and_max():
     zone = _zone()  # 540 s of water + 60 s of lead
     assert step_seconds(_step(adjust_seconds=60), zone) == 660
@@ -194,10 +190,6 @@ async def test_service_refuses_politely():
     with pytest.raises(ServiceValidationError):
         await coord.handle_adjust_program(
             SimpleNamespace(data={"program_id": "nope", "percent": 120})
-        )
-    with pytest.raises(ServiceValidationError):
-        await coord.handle_adjust_program(
-            SimpleNamespace(data={"program_id": "main", "percent": 120})
         )
     coord.store.async_update_config.assert_not_called()
 

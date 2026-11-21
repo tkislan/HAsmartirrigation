@@ -163,7 +163,7 @@ async def test_off_the_info_announces_no_start():
     from custom_components.smart_irrigation import websockets
 
     coordinator = MagicMock()
-    coordinator.main_program_uses_schedules = lambda: False
+    coordinator.schedules_start_watering = lambda: False
     coordinator.async_main_program_next_start = AsyncMock(return_value=None)
     coordinator.store.async_get_zones = AsyncMock(return_value=[])
     coordinator.store.async_get_config = AsyncMock(return_value={})
@@ -276,4 +276,76 @@ async def test_the_switch_entity_reads_and_writes_the_setting():
 
     coordinator.async_update_config.assert_awaited_once_with(
         {const.CONF_IRRIGATION_ENABLED: True}
+    )
+
+
+# --- calculating only -------------------------------------------------------------
+
+
+def _calculating_only(store):
+    store.config.irrigation_enabled = True
+    store.config.watering_enabled = False
+    return store
+
+
+def test_calculating_only_holds_the_watering_and_not_the_calculation():
+    from custom_components.smart_irrigation.master_switch import watering_off
+
+    config = SimpleNamespace(irrigation_enabled=True, watering_enabled=False)
+    assert watering_off(config) and not irrigation_off(config)
+    assert watering_off(SimpleNamespace(irrigation_enabled=False))
+    assert not watering_off(SimpleNamespace(irrigation_enabled=True))
+    assert not watering_off({})
+    assert Config().watering_enabled is True
+
+
+async def test_calculating_only_opens_no_valve_and_runs_no_program(monkeypatch):
+    hass = make_hass()
+    coord = Coordinator(hass, _calculating_only(make_store([zone(0), zone(1)])))
+    await coord.async_run_direct_valves()
+    assert hass.calls == []
+
+    hass, coord, _sleeps = _setup(monkeypatch, _two_programs())
+    _calculating_only(coord.store)
+    assert await coord.async_run_program("night") is False
+    assert await coord.async_water_zone_now(0, 60) is False
+    await _settle()
+    assert hass.calls == []
+
+
+async def test_choosing_calculate_only_stops_what_is_watering():
+    from unittest.mock import patch
+
+    coordinator = _switching_coordinator(True)
+    coordinator.store.config.watering_enabled = True
+
+    with patch("custom_components.smart_irrigation.async_dispatcher_send"):
+        await coordinator.async_update_config({const.CONF_WATERING_ENABLED: False})
+
+    coordinator.async_stop_watering.assert_awaited_once()
+    coordinator._start_windows_now.assert_not_awaited()
+
+
+async def test_the_config_view_ignores_the_old_calculate_only_switch():
+    """watering_enabled: false is no longer stored (the one choice replaced it)."""
+    from custom_components.smart_irrigation.websockets import (
+        SmartIrrigationConfigView,
+    )
+
+    coordinator = SimpleNamespace(async_update_config=AsyncMock())
+    request = SimpleNamespace(
+        app={"hass": SimpleNamespace(data={const.DOMAIN: {"coordinator": coordinator}})}
+    )
+    view = SmartIrrigationConfigView()
+    from unittest.mock import patch
+
+    with patch("custom_components.smart_irrigation.websockets.async_dispatcher_send"):
+        await view.post.__wrapped__(
+            view,
+            request,
+            {const.CONF_WATERING_ENABLED: False, const.CONF_AUTO_CALC_ENABLED: True},
+        )
+
+    coordinator.async_update_config.assert_awaited_once_with(
+        {const.CONF_AUTO_CALC_ENABLED: True}
     )

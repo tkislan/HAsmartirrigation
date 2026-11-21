@@ -38,19 +38,7 @@
           "waiting": "Aguardando",
           "running": "Em execução",
           "paused": "Pausado",
-          "suspended": "Suspenso",
-          "disabled": "Desativado"
-        }
-      },
-      "program_main": {
-        "name": "Programa principal",
-        "state": {
-          "idle": "Inativo",
-          "waiting": "Aguardando",
-          "running": "Em execução",
-          "paused": "Pausado",
-          "suspended": "Suspenso",
-          "disabled": "Desativado"
+          "suspended": "Suspenso"
         }
       }
     },
@@ -113,6 +101,12 @@
       },
       "any_problem": {
         "name": "Problema"
+      },
+      "leak": {
+        "name": "Vazamento"
+      },
+      "observed_watering": {
+        "name": "Rega observada"
       }
     },
     "switch": {
@@ -144,20 +138,13 @@
     }
   },
   "options": {
-    "error": {
-      "invalid_coordinates": "Coordenadas inválidas fornecidas. Verifique os valores de latitude (-90 a 90) e longitude (-180 a 180)."
-    },
     "step": {
-      "coordinates": {
-        "title": "Coordenadas da localização",
-        "description": "Configure as coordenadas da localização para a obtenção de dados meteorológicos. Você pode usar coordenadas manuais diferentes da localização do seu Home Assistant, se necessário.",
-        "data": {
-          "manual_coordinates_enabled": "Usar coordenadas manuais em vez da localização do Home Assistant",
-          "manual_latitude": "Latitude (graus decimais, -90 a 90)",
-          "manual_longitude": "Longitude (graus decimais, -180 a 180)",
-          "manual_elevation": "Altitude acima do nível do mar (metros, opcional)"
-        }
+      "init": {
+        "title": "Smart Irrigation"
       }
+    },
+    "abort": {
+      "use_panel": "O Smart Irrigation é configurado no próprio painel: abra o Smart Irrigation na barra lateral. A localização para a qual o clima é lido fica em Clima › Serviço de meteorologia (modo: Avançado)."
     }
   },
   "services": {
@@ -325,7 +312,7 @@
     },
     "run_program": {
       "name": "Executar programa",
-      "description": "Executar agora um programa do controlador completo, ou assim que for a vez dele quando outro estiver rodando. O programa irriga suas zonas com as durações que o Smart Irrigation calculou, a não ser que as etapas dele digam outra coisa.",
+      "description": "Executar agora um programa, ou assim que for a vez dele quando outro estiver rodando. O programa irriga suas zonas com as durações que o Smart Irrigation calculou, a não ser que as etapas dele digam outra coisa.",
       "fields": {
         "program_id": {
           "name": "Programa",
@@ -343,7 +330,7 @@
     },
     "stop_program": {
       "name": "Parar programa",
-      "description": "Parar um programa. Se estiver rodando, as zonas abertas são fechadas do jeito normal e creditadas pelo que forneceram; se estiver esperando a vez, é tirado da fila. Um programa desconhecido não faz nada. O programa principal é parado com stop_watering.",
+      "description": "Parar um programa. Se estiver rodando, as zonas abertas são fechadas do jeito normal e creditadas pelo que forneceram; se estiver esperando a vez, é tirado da fila. Um programa desconhecido não faz nada. Toda a irrigação é parada com stop_watering.",
       "fields": {
         "program_id": {
           "name": "Programa",
@@ -352,8 +339,8 @@
       }
     },
     "set_program_enabled": {
-      "name": "Ativar ou desativar um programa",
-      "description": "Ligar ou desligar um programa do controlador completo, como faz o interruptor nas configurações dele.",
+      "name": "Ativar ou desativar todos os horários de um programa (obsoleta)",
+      "description": "Obsoleta: ativa ou desativa todos os horários de um programa. Um programa não tem mais interruptor próprio; use set_schedule_enabled para um horário. Será removida na 2027.11.",
       "fields": {
         "program_id": {
           "name": "Programa",
@@ -443,7 +430,7 @@
     },
     "adjust_program": {
       "name": "Ajustar um programa",
-      "description": "Fazer um programa do controlador completo irrigar por mais ou menos tempo, durante um período. O ajuste substitui o anterior (nunca se soma), vale para as execuções que começam depois de definido e termina após as horas indicadas.",
+      "description": "Fazer um programa irrigar por mais ou menos tempo, durante um período. O ajuste substitui o anterior (nunca se soma), vale para as execuções que começam depois de definido e termina após as horas indicadas.",
       "fields": {
         "program_id": {
           "name": "Programa",
@@ -761,9 +748,39 @@
       "title": "A ação {action} vai deixar de existir",
       "description": "Uma automação, um script ou um painel chamou **{action}**. Ela ainda funciona, mas será removida a partir da versão {version}, no inverno, fora da temporada de irrigação.\n\nUse **{replacement}** no lugar: faz o mesmo, e para todas as zonas quando nenhuma zona é escolhida. Este aviso volta a cada chamada do nome antigo, até não sobrar nenhuma."
     },
+    "deprecated_program_enabled": {
+      "title": "A ação {action} vai deixar de existir",
+      "description": "Uma automação, um script ou um painel chamou **{action}**. Um programa não tem mais interruptor próprio, então agora ela ativa ou desativa todos os horários do programa. Ela será removida a partir da versão {version}, no inverno, fora da temporada de irrigação.\n\nUse **{replacement}** no lugar, uma vez por horário. Este aviso volta a cada chamada do nome antigo, até não restar nenhuma."
+    },
     "deprecated_recurring_schedule": {
       "title": "Os agendamentos recorrentes vão deixar de existir: {action}",
       "description": "Uma automação, um script ou um painel chamou **{action}**. Os agendamentos recorrentes ainda funcionam, mas serão removidos a partir da versão {version}, no inverno, fora da temporada de irrigação.\n\nOs agendamentos dos programas fazem o mesmo e ficam no painel: configure-os em **Irrigação**, depois remova os agendamentos recorrentes e as chamadas a {action}."
+    },
+    "zone_set_aside": {
+      "title": "A zona {zone} foi deixada de lado",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Reativar a zona {zone}",
+            "description": "A válvula da zona **{zone}** falhou {count} vezes seguidas (não abriu, não deu água, ou o temporizador não pôde ser definido), então o Smart Irrigation parou de regá-la.\n\nVerifique a válvula, a alimentação ou as pilhas e a entrada de água. A zona volta sozinha quando a válvula é vista abrindo, por exemplo testada à mão. Ou reative-a agora.\n\nO Smart Irrigation voltará a regar a zona {zone} a partir da próxima rega e contará as falhas do zero."
+          }
+        }
+      }
+    },
+    "leak": {
+      "title": "Está correndo água com todas as válvulas fechadas",
+      "description": "O medidor **{meter}** contou {litres} L enquanto todas as válvulas de {zones} estavam fechadas. Pode haver um vazamento ou uma válvula travada aberta.\n\nO alerta some sozinho quando o medidor fica parado por meia hora. O evento `smart_irrigation_leak` e o sensor Vazamento permitem que uma automação feche uma válvula principal."
+    },
+    "moved_to_calculate_and_water": {
+      "title": "O controle direto das válvulas agora é \"Calcular e regar\"",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Sua irrigação continua como antes",
+            "description": "O Smart Irrigation agora tem uma única configuração para o que ele faz: **Calcular e regar**, **Só calcular** ou **Parar tudo**, na aba Configurações. Sua instalação abria as válvulas sozinha, então passou para **Calcular e regar**.\n\nSuas zonas são irrigadas como antes, no mesmo momento: o gatilho de início virou um horário do programa **Irrigação**, na nova aba **Irrigação**. Escolha **Só calcular** se o Smart Irrigation não deve mais abrir as válvulas."
+          }
+        }
+      }
     }
   }
 }

@@ -38,19 +38,7 @@
           "waiting": "Čaká",
           "running": "Beží",
           "paused": "Pozastavený",
-          "suspended": "Odložený",
-          "disabled": "Vypnutý"
-        }
-      },
-      "program_main": {
-        "name": "Hlavný program",
-        "state": {
-          "idle": "Nečinný",
-          "waiting": "Čaká",
-          "running": "Beží",
-          "paused": "Pozastavený",
-          "suspended": "Odložený",
-          "disabled": "Vypnutý"
+          "suspended": "Odložený"
         }
       }
     },
@@ -113,6 +101,12 @@
       },
       "any_problem": {
         "name": "Problém"
+      },
+      "leak": {
+        "name": "Únik"
+      },
+      "observed_watering": {
+        "name": "Sledované zavlažovanie"
       }
     },
     "switch": {
@@ -144,20 +138,13 @@
     }
   },
   "options": {
-    "error": {
-      "invalid_coordinates": "Neplatné súradnice. Skontrolujte hodnoty zemepisnej šírky (-90 až 90) a zemepisnej dĺžky (-180 až 180)."
-    },
     "step": {
-      "coordinates": {
-        "title": "Súradnice polohy",
-        "description": "Nakonfigurujte súradnice polohy pre získavanie meteorologických údajov. Môžete použiť manuálne súradnice odlišné od vašej polohy Home Assistant ak je to potrebné.",
-        "data": {
-          "manual_coordinates_enabled": "Použiť manuálne súradnice namiesto polohy Home Assistant",
-          "manual_latitude": "Zemepisná šírka (desatinné stupne, -90 až 90)",
-          "manual_longitude": "Zemepisná dĺžka (desatinné stupne, -180 až 180)",
-          "manual_elevation": "Nadmorská výška (metre, voliteľné)"
-        }
+      "init": {
+        "title": "Smart Irrigation"
       }
+    },
+    "abort": {
+      "use_panel": "Smart Irrigation sa nastavuje vo vlastnom paneli: otvorte Smart Irrigation v bočnom paneli. Miesto, pre ktoré sa číta počasie, je v Počasie › Poveternostná služba (režim: Pokročilý)."
     }
   },
   "services": {
@@ -325,7 +312,7 @@
     },
     "run_program": {
       "name": "Spustiť program",
-      "description": "Spustite program plného ovládača teraz, alebo hneď ako príde na rad, keď beží iný. Program zalieva svoje zóny trvaniami, ktoré vypočítala Smart Irrigation, pokiaľ jeho kroky neurčujú inak.",
+      "description": "Spustite program teraz, alebo hneď ako príde na rad, keď beží iný. Program zalieva svoje zóny trvaniami, ktoré vypočítala Smart Irrigation, pokiaľ jeho kroky neurčujú inak.",
       "fields": {
         "program_id": {
           "name": "Program",
@@ -343,7 +330,7 @@
     },
     "stop_program": {
       "name": "Zastaviť program",
-      "description": "Zastavte jeden program. Ak beží, jeho otvorené zóny sa zatvoria bežným spôsobom a pripíše sa im, čo dodali; ak čaká na svoj rad, vyradí sa z radu. Neznámy program nerobí nič. Hlavný program sa zastavuje pomocou stop_watering.",
+      "description": "Zastavte jeden program. Ak beží, jeho otvorené zóny sa zatvoria bežným spôsobom a pripíše sa im, čo dodali; ak čaká na svoj rad, vyradí sa z radu. Neznámy program nerobí nič. Celé zavlažovanie zastaví stop_watering.",
       "fields": {
         "program_id": {
           "name": "Program",
@@ -352,8 +339,8 @@
       }
     },
     "set_program_enabled": {
-      "name": "Povoliť alebo zakázať program",
-      "description": "Zapnite alebo vypnite program plného ovládača, rovnako ako prepínač v jeho nastaveniach.",
+      "name": "Zapnúť alebo vypnúť všetky rozvrhy programu (zastarané)",
+      "description": "Zastarané: zapne alebo vypne všetky rozvrhy programu. Program už nemá vlastný vypínač; pre jeden rozvrh použi set_schedule_enabled. Bude odstránená vo verzii 2027.11.",
       "fields": {
         "program_id": {
           "name": "Program",
@@ -443,7 +430,7 @@
     },
     "adjust_program": {
       "name": "Upraviť program",
-      "description": "Nechajte program plného ovládača na čas zalievať dlhšie alebo kratšie. Úprava nahrádza predchádzajúcu (nikdy sa nesčítava), platí pre behy, ktoré začnú po jej nastavení, a končí po zadaných hodinách.",
+      "description": "Nechajte program na čas zalievať dlhšie alebo kratšie. Úprava nahrádza predchádzajúcu (nikdy sa nesčítava), platí pre behy, ktoré začnú po jej nastavení, a končí po zadaných hodinách.",
       "fields": {
         "program_id": {
           "name": "Program",
@@ -761,9 +748,39 @@
       "title": "Akcia {action} končí",
       "description": "Automatizácia, skript alebo dashboard zavolal **{action}**. Stále funguje, ale od verzie {version} bude odstránená, v zime, mimo sezóny zavlažovania.\n\nPoužite namiesto nej **{replacement}**: robí to isté, a pre všetky zóny, keď nie je zvolená žiadna. Toto upozornenie sa vracia s každým volaním starého názvu, kým žiadne nezostane."
     },
+    "deprecated_program_enabled": {
+      "title": "Akcia {action} končí",
+      "description": "Automatizácia, skript alebo dashboard zavolal **{action}**. Program už nemá vlastný vypínač, preto akcia teraz zapne alebo vypne všetky rozvrhy programu. Bude odstránená od verzie {version}, v zime, mimo sezóny zavlažovania.\n\nPouži namiesto nej **{replacement}**, raz pre každý rozvrh. Toto upozornenie sa vracia pri každom volaní starého názvu, kým žiadne nezostane."
+    },
     "deprecated_recurring_schedule": {
       "title": "Opakované rozvrhy končia: {action}",
       "description": "Automatizácia, skript alebo dashboard zavolal **{action}**. Opakované rozvrhy stále fungujú, ale od verzie {version} budú odstránené, v zime, mimo sezóny zavlažovania.\n\nRozvrhy programov robia to isté a sú v paneli: nastavte ich v sekcii **Zavlažovanie**, potom odstráňte opakované rozvrhy a volania {action}."
+    },
+    "zone_set_aside": {
+      "title": "Zóna {zone} je odložená",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Znova zaradiť zónu {zone}",
+            "description": "Ventil zóny **{zone}** zlyhal {count}-krát za sebou (neotvoril sa, nedal vodu, alebo sa nedal nastaviť jeho časovač), preto ju Smart Irrigation prestal zavlažovať.\n\nSkontrolujte ventil, napájanie alebo batérie a prívod vody. Zóna sa vráti sama, keď sa jej ventil otvorí, napríklad pri ručnej skúške. Alebo ju zaraďte hneď.\n\nSmart Irrigation bude zónu {zone} znova zavlažovať od ďalšieho behu a neúspechy začne počítať od nuly."
+          }
+        }
+      }
+    },
+    "leak": {
+      "title": "Voda tečie pri zatvorených ventiloch",
+      "description": "Vodomer **{meter}** napočítal {litres} l, kým boli všetky ventily {zones} zatvorené. Môže unikať potrubie alebo zostal otvorený ventil.\n\nUpozornenie zmizne samo, keď vodomer pol hodiny stojí. Udalosť `smart_irrigation_leak` a senzor Únik umožnia automatizácii zavrieť hlavný ventil."
+    },
+    "moved_to_calculate_and_water": {
+      "title": "Priame ovládanie ventilov je teraz „Počítať a zavlažovať“",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Vaše zavlažovanie pokračuje ako doteraz",
+            "description": "Smart Irrigation má teraz jediné nastavenie toho, čo robí: **Počítať a zavlažovať**, **Len počítať** alebo **Všetko zastaviť**, na karte Nastavenia. Vaša inštalácia sama otvárala ventily, preto bola prevedená na **Počítať a zavlažovať**.\n\nVaše zóny sa zavlažujú ako doteraz, v rovnakom čase: spúšťač štartu sa stal plánom programu **Zavlažovanie** na novej karte **Zavlažovanie**. Zvoľte **Len počítať**, ak už Smart Irrigation nemá otvárať ventily."
+          }
+        }
+      }
     }
   }
 }

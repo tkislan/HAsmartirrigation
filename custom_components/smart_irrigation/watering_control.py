@@ -23,6 +23,7 @@ import copy
 import logging
 import math
 from datetime import datetime, timedelta
+from typing import Any, cast
 
 import homeassistant.util.dt as dt_util
 import voluptuous as vol
@@ -30,8 +31,8 @@ from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 
 from . import const
-from .master_switch import irrigation_off
-from .programs import find_program
+from .master_switch import watering_off
+from .programs import find_program, set_schedules_enabled
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -109,6 +110,9 @@ RUN_PROGRAM_SCHEMA = vol.Schema(
 )
 STOP_PROGRAM_SCHEMA = vol.Schema(
     {vol.Required(const.ATTR_PROGRAM_ID): cv.string}, extra=vol.ALLOW_EXTRA
+)
+NEXT_STEP_SCHEMA = vol.Schema(
+    {vol.Optional(const.ATTR_PROGRAM_ID): cv.string}, extra=vol.ALLOW_EXTRA
 )
 SET_PROGRAM_ENABLED_SCHEMA = vol.Schema(
     {
@@ -334,13 +338,17 @@ class WateringControlMixin:
 
     # --- next step -----------------------------------------------------------------
 
-    async def async_skip_step(self) -> list:
+    async def async_skip_step(self, program_id=None) -> list:
         """End the zones of the step a program is on, and let it go on.
 
+        Programs on supplies of their own water side by side: ``program_id``
+        keeps it to one of them, and without it every program running moves on.
         Returns the ids of the zones that were ended.
         """
         skipped = []
         for run in self._program_registry().values():
+            if program_id is not None and run.program_id != str(program_id):
+                continue
             for zone_id in list(getattr(run, "current_zones", ()) or ()):
                 control = self._run_controls().get(int(zone_id))
                 if control is not None:
@@ -366,6 +374,11 @@ class WateringControlMixin:
         return until
 
     def is_suspended(self, kind: str, ident) -> bool:
+        # A zone set aside after failed runs is kept from watering the same
+        # way, by every runner and in the planning (set_aside.py).
+        set_aside = getattr(self, "zone_set_aside", None)
+        if kind == const.SUSPEND_ZONE and callable(set_aside) and set_aside(ident):
+            return True
         return self.suspended_until(kind, ident) is not None
 
     async def async_suspend(self, kind: str, ident, hours=None, until=None) -> object:
@@ -420,10 +433,50 @@ class WateringControlMixin:
 
     # --- switching a program, a step or a schedule on or off ------------------------------
 
+    async def async_set_schedules_enabled(self, program_id, enabled: bool) -> bool:
+        """Switch every schedule of a program on or off, as one save.
+
+        What ``set_program_enabled`` does now that a program has no on/off of
+        its own. Returns True when a schedule changed; False when the full
+        controller is off, the program is unknown, or nothing changed.
+        """
+        config = self.store.config
+        if getattr(config, const.CONF_FULL_CONTROLLER, False) is not True:
+            _LOGGER.warning(
+                "Nothing changed: Smart Irrigation is not set to Calculate and water"
+            )
+            return False
+        programs = copy.deepcopy(getattr(config, const.CONF_PROGRAMS, None) or [])
+        program = find_program(programs, program_id)
+        if program is None:
+            _LOGGER.warning("Program %s does not exist", program_id)
+            return False
+        enabled = bool(enabled)
+        if all(
+            (s.get(const.SCHEDULE_ENABLED) is not False) == enabled
+            for s in program.get(const.PROGRAM_SCHEDULES) or []
+        ):
+            return False
+        programs = [
+            (
+                set_schedules_enabled(p, enabled)
+                if p.get(const.PROGRAM_ID) == program_id
+                else p
+            )
+            for p in programs
+        ]
+        await self.async_update_config({const.CONF_PROGRAMS: programs})
+        _LOGGER.info(
+            "Program %s: every schedule %s",
+            program_id,
+            "switched on" if enabled else "switched off",
+        )
+        return True
+
     async def async_set_enabled(
         self, program_id, enabled: bool, step_id=None, schedule_id=None
     ) -> bool:
-        """Change the ``enabled`` flag of a program, one of its steps or schedules.
+        """Switch one step or one schedule of a program on or off.
 
         The change goes through the coordinator's configuration update, as a save
         from the panel does: the programs are normalized, stored, the schedules
@@ -433,43 +486,43 @@ class WateringControlMixin:
         """
         config = self.store.config
         if getattr(config, const.CONF_FULL_CONTROLLER, False) is not True:
-            _LOGGER.warning("Nothing changed: the full controller is off")
+            _LOGGER.warning(
+                "Nothing changed: Smart Irrigation is not set to Calculate and water"
+            )
             return False
         programs = copy.deepcopy(getattr(config, const.CONF_PROGRAMS, None) or [])
         program = find_program(programs, program_id)
         if program is None:
             _LOGGER.warning("Program %s does not exist", program_id)
             return False
-        target, key, kind, ident = program, const.PROGRAM_ENABLED, "Program", program_id
         if step_id is not None:
             kind, key, ident = "Step", const.STEP_ENABLED, step_id
             items, id_key = program.get(const.PROGRAM_STEPS), const.STEP_ID
         elif schedule_id is not None:
             kind, key, ident = "Schedule", const.SCHEDULE_ENABLED, schedule_id
             items, id_key = program.get(const.PROGRAM_SCHEDULES), const.SCHEDULE_ID
-        if kind != "Program":
-            target = next(
-                (
-                    i
-                    for i in items or []
-                    if isinstance(i, dict) and i.get(id_key) == ident
-                ),
-                None,
+        else:
+            # The program itself has no on/off: its schedules are switched.
+            return await self.async_set_schedules_enabled(program_id, enabled)
+        target = next(
+            (i for i in items or [] if isinstance(i, dict) and i.get(id_key) == ident),
+            None,
+        )
+        if target is None:
+            _LOGGER.warning(
+                "%s %s does not exist in program %s", kind, ident, program_id
             )
-            if target is None:
-                _LOGGER.warning(
-                    "%s %s does not exist in program %s", kind, ident, program_id
-                )
-                return False
+            return False
         enabled = bool(enabled)
         if (target.get(key) is not False) == enabled:
             return False
         target[key] = enabled
         await self.async_update_config({const.CONF_PROGRAMS: programs})
         _LOGGER.info(
-            "%s %s %s",
+            "%s %s/%s %s",
             kind,
-            program_id if kind == "Program" else f"{program_id}/{ident}",
+            program_id,
+            ident,
             "enabled" if enabled else "disabled",
         )
         return True
@@ -497,7 +550,7 @@ class WateringControlMixin:
             is not True
         ):
             return False
-        if irrigation_off(config):
+        if watering_off(config):
             _LOGGER.info(
                 "Smart Irrigation is switched off: zone %s is not watered", zone_id
             )
@@ -511,7 +564,9 @@ class WateringControlMixin:
         while cycle is not None:
             await cycle["done"].wait()
             cycle = self._sequential_cycle
-        async with self._executor_lock():
+        # The turn on the zone's own supply (program_runner, turns.py).
+        runner = cast(Any, self)
+        async with runner._turns().turn(lambda: runner._zone_turn_keys([zone_id])):
             if getattr(self, "_stop_generation", 0) != generation:
                 return False
             zone = self.store.get_zone(zone_id)

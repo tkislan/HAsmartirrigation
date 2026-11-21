@@ -38,19 +38,7 @@
           "waiting": "En attente",
           "running": "En cours",
           "paused": "En pause",
-          "suspended": "Suspendu",
-          "disabled": "Désactivé"
-        }
-      },
-      "program_main": {
-        "name": "Programme principal",
-        "state": {
-          "idle": "Au repos",
-          "waiting": "En attente",
-          "running": "En cours",
-          "paused": "En pause",
-          "suspended": "Suspendu",
-          "disabled": "Désactivé"
+          "suspended": "Suspendu"
         }
       }
     },
@@ -113,6 +101,12 @@
       },
       "any_problem": {
         "name": "Problème"
+      },
+      "leak": {
+        "name": "Fuite"
+      },
+      "observed_watering": {
+        "name": "Arrosage observé"
       }
     },
     "switch": {
@@ -144,20 +138,13 @@
     }
   },
   "options": {
-    "error": {
-      "invalid_coordinates": "Coordonnées invalides. Vérifie la latitude (-90 à 90) et la longitude (-180 à 180)."
-    },
     "step": {
-      "coordinates": {
-        "title": "Coordonnées de localisation",
-        "description": "Configure les coordonnées de localisation pour la récupération des données météo. Tu peux utiliser des coordonnées manuelles différentes de l'emplacement de ton Home Assistant si nécessaire.",
-        "data": {
-          "manual_coordinates_enabled": "Utiliser des coordonnées manuelles au lieu de l'emplacement de Home Assistant",
-          "manual_latitude": "Latitude (degrés décimaux, -90 à 90)",
-          "manual_longitude": "Longitude (degrés décimaux, -180 à 180)",
-          "manual_elevation": "Altitude au-dessus du niveau de la mer (mètres, optionnel)"
-        }
+      "init": {
+        "title": "Smart Irrigation"
       }
+    },
+    "abort": {
+      "use_panel": "Smart Irrigation se règle dans son propre panneau : ouvre Smart Irrigation dans la barre latérale. Le lieu pour lequel la météo est lue se trouve dans Météo › Service météo (mode : Avancé)."
     }
   },
   "services": {
@@ -325,7 +312,7 @@
     },
     "run_program": {
       "name": "Lancer un programme",
-      "description": "Lancer un programme du contrôleur complet maintenant, ou dès que c'est son tour si un autre tourne. Le programme arrose ses zones avec les durées calculées par Smart Irrigation, sauf si ses étapes disent autre chose.",
+      "description": "Lancer un programme maintenant, ou dès que c'est son tour si un autre tourne. Le programme arrose ses zones avec les durées calculées par Smart Irrigation, sauf si ses étapes disent autre chose.",
       "fields": {
         "program_id": {
           "name": "Programme",
@@ -343,7 +330,7 @@
     },
     "stop_program": {
       "name": "Arrêter un programme",
-      "description": "Arrêter un programme. S'il tourne, ses zones ouvertes sont fermées normalement et créditées de ce qu'elles ont apporté ; s'il attend son tour, il est retiré de la file d'attente. Un programme inconnu ne fait rien. Le programme principal s'arrête avec stop_watering.",
+      "description": "Arrêter un programme. S'il tourne, ses zones ouvertes sont fermées normalement et créditées de ce qu'elles ont apporté ; s'il attend son tour, il est retiré de la file d'attente. Un programme inconnu ne fait rien. Tout l'arrosage s'arrête avec stop_watering.",
       "fields": {
         "program_id": {
           "name": "Programme",
@@ -352,8 +339,8 @@
       }
     },
     "set_program_enabled": {
-      "name": "Activer ou désactiver un programme",
-      "description": "Activer ou désactiver un programme du contrôleur complet, comme l'interrupteur de ses réglages.",
+      "name": "Activer ou désactiver tous les horaires d'un programme (obsolète)",
+      "description": "Obsolète : active ou désactive tous les horaires d'un programme. Un programme n'a plus d'interrupteur à lui ; utilise set_schedule_enabled pour un horaire. Retirée en 2027.11.",
       "fields": {
         "program_id": {
           "name": "Programme",
@@ -443,7 +430,7 @@
     },
     "adjust_program": {
       "name": "Ajuster un programme",
-      "description": "Faire arroser un programme du contrôleur complet plus longtemps ou moins longtemps, pour un temps. L'ajustement remplace le précédent (il ne s'additionne jamais), s'applique aux passages qui démarrent après lui et prend fin après le nombre d'heures indiqué.",
+      "description": "Faire arroser un programme plus longtemps ou moins longtemps, pour un temps. L'ajustement remplace le précédent (il ne s'additionne jamais), s'applique aux passages qui démarrent après lui et prend fin après le nombre d'heures indiqué.",
       "fields": {
         "program_id": {
           "name": "Programme",
@@ -723,11 +710,11 @@
     },
     "missing_input": {
       "title": "Zone {zone} : rien n'a pu être calculé",
-      "description": "L'évapotranspiration de la zone **{zone}** n'a pas pu être calculée, car les données météo n'avaient aucune valeur pour : **{missing}**.\n\nTant que ce n'est pas le cas, le déficit de la zone ne bouge pas et elle n'est pas arrosée, ce qui ressemble exactement à une zone sans besoin.\n\nVérifiez que les capteurs associés à ces champs sont disponibles, ou que le service météo les envoie toujours. Le problème disparaît au prochain calcul possible."
+      "description": "L'évapotranspiration de la zone **{zone}** n'a pas pu être calculée, car les données météo n'avaient aucune valeur pour : **{missing}**.\n\nTant que ce n'est pas le cas, le déficit de la zone ne bouge pas et elle n'est pas arrosée, ce qui ressemble exactement à une zone sans besoin.\n\nVérifie que les capteurs associés à ces champs sont disponibles, ou que le service météo les envoie toujours. Le problème disparaît au prochain calcul possible."
     },
     "undersized_zone": {
       "title": "Zone {zone} : un cycle ne peut pas arroser ce qu'elle perd",
-      "description": "Le cycle le plus long de la zone **{zone}** apporte environ **{capacity} mm**, mais la zone perd environ **{need} mm** entre deux arrosages ({days} jour(s)). Son déficit continuera de croître tant que la météo reste ce qu'elle est.\n\nLe plafond est la durée maximale de la zone. Augmentez-la, donnez plus d'émetteurs ou un débit plus élevé à la zone, ou réduisez les jours entre les arrosages. Si le plafond est voulu, vous pouvez ignorer cet avis."
+      "description": "Le cycle le plus long de la zone **{zone}** apporte environ **{capacity} mm**, mais la zone perd environ **{need} mm** entre deux arrosages ({days} jour(s)). Son déficit continuera de croître tant que la météo reste ce qu'elle est.\n\nLe plafond est la durée maximale de la zone. Augmente-la, donne plus d'émetteurs ou un débit plus élevé à la zone, ou réduis les jours entre les arrosages. Si le plafond est voulu, tu peux ignorer cet avis."
     },
     "throughput_mismatch": {
       "title": "Zone {zone} : le débit mesuré ne correspond pas au débit configuré",
@@ -761,9 +748,39 @@
       "title": "L'action {action} va disparaître",
       "description": "Une automatisation, un script ou un tableau de bord a appelé **{action}**. Elle fonctionne encore, mais elle sera retirée à partir de la version {version}, en hiver, hors de la saison d'arrosage.\n\nUtilise **{replacement}** à la place : elle fait la même chose, et pour toutes les zones quand aucune zone n'est choisie. Cet avis revient à chaque appel de l'ancien nom, jusqu'à ce qu'il n'en reste plus."
     },
+    "deprecated_program_enabled": {
+      "title": "L'action {action} va disparaître",
+      "description": "Une automatisation, un script ou un tableau de bord a appelé **{action}**. Un programme n'a plus d'interrupteur à lui : elle active ou désactive donc maintenant tous les horaires du programme. Elle sera retirée à partir de la version {version}, en hiver, hors de la saison d'arrosage.\n\nUtilise **{replacement}** à la place, une fois par horaire. Cet avis revient à chaque appel de l'ancien nom, jusqu'à ce qu'il n'en reste plus."
+    },
     "deprecated_recurring_schedule": {
       "title": "Les planifications récurrentes vont disparaître : {action}",
       "description": "Une automatisation, un script ou un tableau de bord a appelé **{action}**. Les planifications récurrentes fonctionnent encore, mais elles seront retirées à partir de la version {version}, en hiver, hors de la saison d'arrosage.\n\nLes horaires des programmes font la même chose et se trouvent dans le panneau : configure-les dans **Arrosage**, puis supprime les planifications récurrentes et les appels à {action}."
+    },
+    "zone_set_aside": {
+      "title": "La zone {zone} est mise de côté",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Remettre la zone {zone} en service",
+            "description": "La vanne de la zone **{zone}** a échoué {count} fois de suite (elle ne s'est pas ouverte, n'a pas donné d'eau, ou sa minuterie n'a pas pu être réglée), donc Smart Irrigation a cessé de l'arroser.\n\nVérifie la vanne, son alimentation ou ses piles et son arrivée d'eau. La zone revient d'elle-même quand on voit sa vanne s'ouvrir, par exemple en l'essayant à la main. Ou remets-la en service maintenant.\n\nSmart Irrigation arrosera de nouveau la zone {zone} dès son prochain arrosage, et recomptera ses échecs à partir de zéro."
+          }
+        }
+      }
+    },
+    "leak": {
+      "title": "De l'eau coule, toutes les vannes fermées",
+      "description": "Le compteur **{meter}** a compté {litres} L alors que toutes les vannes de {zones} étaient fermées. Un tuyau fuit peut-être, ou une vanne est restée ouverte.\n\nL'alerte disparaît d'elle-même quand le compteur ne bouge plus pendant une demi-heure. L'événement `smart_irrigation_leak` et le capteur Fuite permettent à une automatisation de fermer une vanne maîtresse."
+    },
+    "moved_to_calculate_and_water": {
+      "title": "Le pilotage des vannes est devenu « Calculer et arroser »",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Ton arrosage continue comme avant",
+            "description": "Smart Irrigation a maintenant un seul réglage pour ce qu'il fait : **Calculer et arroser**, **Calculer seulement** ou **Tout arrêter**, dans l'onglet Réglages. Ton installation ouvrait elle-même les vannes : elle est passée en **Calculer et arroser**.\n\nTes zones sont arrosées comme avant, au même moment : le déclencheur de départ est devenu un horaire du programme **Arrosage**, dans le nouvel onglet **Arrosage**. Choisis **Calculer seulement** si Smart Irrigation ne doit plus ouvrir les vannes."
+          }
+        }
+      }
     }
   }
 }

@@ -139,6 +139,10 @@ export const modernStyle = css`
   .row-hint {
     margin: -6px 0 12px 0;
   }
+  /* A hint that says a setting will not do what it reads as. */
+  .setting-hint.warning-hint {
+    color: var(--warning-color, #ff9800);
+  }
   /* Folded blocks of the Programs page: a program, a step, a schedule. */
   details.fold {
     border: 1px solid var(--divider-color);
@@ -150,6 +154,20 @@ export const modernStyle = css`
     cursor: pointer;
     padding: 10px 0;
     list-style-position: inside;
+  }
+  /* A summary line with a switch on its right (a step's or a schedule's
+     "on"): the text takes the room, the switch keeps its own. */
+  details.fold > summary .fold-head {
+    display: inline-flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    width: calc(100% - 1.5em);
+    vertical-align: middle;
+  }
+  details.fold > summary .fold-head-text {
+    flex: 1;
+    min-width: 0;
   }
   details.fold[open] > summary {
     border-bottom: 1px solid var(--divider-color);
@@ -206,6 +224,25 @@ export const modernStyle = css`
   .fold-title {
     font-weight: 500;
   }
+  /* A title with the switch that turns it on, on its right: no "Enabled". */
+  .si-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  /* The title wraps, the switch keeps its size and its line. */
+  .si-head > span:first-child,
+  .setting-row:has(> ha-switch) > .setting-label {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .si-head > ha-switch,
+  .setting-row > ha-switch,
+  .fold-head > ha-switch {
+    flex: 0 0 auto;
+  }
   .setting-hint {
     font-size: 0.8rem;
     font-weight: normal;
@@ -238,6 +275,25 @@ export const modernStyle = css`
     font-weight: 600;
     color: var(--primary-text-color);
     margin-bottom: 4px;
+  }
+  /* A sub-group's title with its switch (the rain sensor, freeze and wind
+     checks): it borrowed the collapsible card's head, padding included, so
+     each one sat indented inside 24 px of empty space more than its rows
+     (#1048). It is a line of the card, not a card's head. */
+  .si-subgroup-title.si-head {
+    padding: 0;
+    cursor: auto;
+    user-select: auto;
+  }
+  .si-subgroup-title:last-child {
+    margin-bottom: 0;
+  }
+  /* Inside a card's content, whose own padding is room enough. */
+  .card-content > .si-subgroup:first-child {
+    padding-top: 0;
+  }
+  .card-content > .si-subgroup:last-child {
+    padding-bottom: 0;
   }
   /* a sub-group's own setting-rows shouldn't draw their own divider line
      (the sub-group already has one), keeps the nested look clean */
@@ -380,6 +436,23 @@ export const modernStyle = css`
       flex-direction: column;
       align-items: stretch;
       gap: 6px;
+    }
+    /* A switch stays on the right of its title, never under it (#1049),
+       and its row is no taller than the switch needs (#1048). */
+    .setting-row:has(> ha-switch) {
+      flex-direction: row;
+      align-items: center;
+      gap: 12px;
+      min-height: 44px;
+    }
+    .card-content > .si-subgroup {
+      padding: 8px 0;
+    }
+    .card-content > .si-subgroup:first-child {
+      padding-top: 0;
+    }
+    .card-content > .si-subgroup:last-child {
+      padding-bottom: 0;
     }
     .field,
     .select-wrap,

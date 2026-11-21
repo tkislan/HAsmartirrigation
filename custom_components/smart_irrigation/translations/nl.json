@@ -38,19 +38,7 @@
           "waiting": "Wachtend",
           "running": "Bezig",
           "paused": "Gepauzeerd",
-          "suspended": "Opgeschort",
-          "disabled": "Uitgeschakeld"
-        }
-      },
-      "program_main": {
-        "name": "Hoofdprogramma",
-        "state": {
-          "idle": "Inactief",
-          "waiting": "Wachtend",
-          "running": "Bezig",
-          "paused": "Gepauzeerd",
-          "suspended": "Opgeschort",
-          "disabled": "Uitgeschakeld"
+          "suspended": "Opgeschort"
         }
       }
     },
@@ -113,6 +101,12 @@
       },
       "any_problem": {
         "name": "Probleem"
+      },
+      "leak": {
+        "name": "Lek"
+      },
+      "observed_watering": {
+        "name": "Waargenomen beregening"
       }
     },
     "switch": {
@@ -144,20 +138,13 @@
     }
   },
   "options": {
-    "error": {
-      "invalid_coordinates": "Ongeldige coördinaten. Controleer breedtegraad (-90 tot 90) en lengtegraad (-180 tot 180) waarden."
-    },
     "step": {
-      "coordinates": {
-        "title": "Locatie coördinaten",
-        "description": "Configureer locatie coördinaten voor het ophalen van weergegevens. Je kunt handmatige coördinaten gebruiken die verschillen van je Home Assistant locatie indien nodig.",
-        "data": {
-          "manual_coordinates_enabled": "Gebruik handmatige coördinaten in plaats van Home Assistant locatie",
-          "manual_latitude": "Breedtegraad (decimale graden, -90 tot 90)",
-          "manual_longitude": "Lengtegraad (decimale graden, -180 tot 180)",
-          "manual_elevation": "Hoogte boven zeeniveau (meters, optioneel)"
-        }
+      "init": {
+        "title": "Smart Irrigation"
       }
+    },
+    "abort": {
+      "use_panel": "Smart Irrigation stel je in via het eigen paneel: open Smart Irrigation in de zijbalk. De locatie waarvoor het weer wordt opgehaald staat onder Weer › Weerdienst (modus: Geavanceerd)."
     }
   },
   "services": {
@@ -325,7 +312,7 @@
     },
     "run_program": {
       "name": "Programma starten",
-      "description": "Start nu een programma van de volledige controller, of zodra het aan de beurt is als er al een ander loopt. Het programma bewatert zijn zones met de duur die Smart Irrigation heeft berekend, tenzij zijn stappen iets anders zeggen.",
+      "description": "Start nu een programma, of zodra het aan de beurt is als er al een ander loopt. Het programma bewatert zijn zones met de duur die Smart Irrigation heeft berekend, tenzij zijn stappen iets anders zeggen.",
       "fields": {
         "program_id": {
           "name": "Programma",
@@ -343,7 +330,7 @@
     },
     "stop_program": {
       "name": "Programma stoppen",
-      "description": "Stop één programma. Als het loopt, worden de open zones op de normale manier gesloten en wordt bijgeschreven wat ze gaven; als het op zijn beurt wacht, wordt het uit de wachtrij gehaald. Een onbekend programma doet niets. Het hoofdprogramma stop je met stop_watering.",
+      "description": "Stop één programma. Als het loopt, worden de open zones op de normale manier gesloten en wordt bijgeschreven wat ze gaven; als het op zijn beurt wacht, wordt het uit de wachtrij gehaald. Een onbekend programma doet niets. Alle beregening stop je met stop_watering.",
       "fields": {
         "program_id": {
           "name": "Programma",
@@ -352,8 +339,8 @@
       }
     },
     "set_program_enabled": {
-      "name": "Een programma in- of uitschakelen",
-      "description": "Zet een programma van de volledige controller aan of uit, zoals de schakelaar in zijn instellingen.",
+      "name": "Alle schema's van een programma schakelen (verouderd)",
+      "description": "Verouderd: zet alle schema's van een programma aan of uit. Een programma heeft geen eigen aan/uit meer; gebruik set_schedule_enabled voor één schema. Verdwijnt in 2027.11.",
       "fields": {
         "program_id": {
           "name": "Programma",
@@ -443,7 +430,7 @@
     },
     "adjust_program": {
       "name": "Een programma bijstellen",
-      "description": "Laat een programma van de volledige controller een tijdlang langer of korter bewateren. De bijstelling vervangt de vorige (ze telt nooit op), geldt voor de runs die starten nadat ze is ingesteld, en eindigt na het opgegeven aantal uren.",
+      "description": "Laat een programma een tijdlang langer of korter bewateren. De bijstelling vervangt de vorige (ze telt nooit op), geldt voor de runs die starten nadat ze is ingesteld, en eindigt na het opgegeven aantal uren.",
       "fields": {
         "program_id": {
           "name": "Programma",
@@ -761,9 +748,39 @@
       "title": "De actie {action} verdwijnt",
       "description": "Een automatisering, een script of een dashboard heeft **{action}** aangeroepen. Die werkt nog, maar wordt verwijderd vanaf versie {version}, in de winter, buiten het bewateringsseizoen.\n\nGebruik in plaats daarvan **{replacement}**: die doet hetzelfde, en voor alle zones als er geen zone is gekozen. Deze melding komt terug bij elke aanroep van de oude naam, tot er geen meer over is."
     },
+    "deprecated_program_enabled": {
+      "title": "De actie {action} verdwijnt",
+      "description": "Een automatisering, script of dashboard riep **{action}** aan. Een programma heeft geen eigen aan/uit meer, dus zet deze actie nu alle schema's van het programma aan of uit. Ze wordt verwijderd vanaf versie {version}, in de winter, buiten het sproeiseizoen.\n\nGebruik in plaats daarvan **{replacement}**, één keer per schema. Deze melding komt terug bij elke aanroep van de oude naam, tot er geen meer over is."
+    },
     "deprecated_recurring_schedule": {
       "title": "Terugkerende schema's verdwijnen: {action}",
       "description": "Een automatisering, een script of een dashboard heeft **{action}** aangeroepen. Terugkerende schema's werken nog, maar worden verwijderd vanaf versie {version}, in de winter, buiten het bewateringsseizoen.\n\nDe schema's van de programma's doen hetzelfde en staan in het paneel: stel ze in onder **Bewatering**, en verwijder dan de terugkerende schema's en de aanroepen van {action}."
+    },
+    "zone_set_aside": {
+      "title": "Zone {zone} is opzijgezet",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Zone {zone} weer inschakelen",
+            "description": "De klep van zone **{zone}** mislukte {count} keer op rij (ging niet open, gaf geen water, of de eigen timer kon niet worden ingesteld), dus Smart Irrigation beregent ze niet meer.\n\nControleer de klep, de voeding of batterijen en de watertoevoer. De zone komt vanzelf terug als haar klep opengaat, bijvoorbeeld met de hand getest. Of schakel ze nu weer in.\n\nSmart Irrigation beregent zone {zone} weer vanaf de volgende beurt en telt de mislukkingen opnieuw vanaf nul."
+          }
+        }
+      }
+    },
+    "leak": {
+      "title": "Er stroomt water terwijl alle kleppen dicht zijn",
+      "description": "De meter **{meter}** telde {litres} L terwijl alle kleppen van {zones} dicht waren. Er lekt misschien een leiding of een klep staat vast open.\n\nDe melding verdwijnt vanzelf als de meter een half uur stilstaat. Het event `smart_irrigation_leak` en de Lek-sensor laten een automatisering een hoofdklep sluiten."
+    },
+    "moved_to_calculate_and_water": {
+      "title": "Directe klepbediening heet nu \"Berekenen en beregenen\"",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Uw beregening gaat door zoals voorheen",
+            "description": "Smart Irrigation heeft nu één instelling voor wat het doet: **Berekenen en beregenen**, **Alleen berekenen** of **Alles stoppen**, op het tabblad Instellingen. Uw installatie opende de kleppen zelf en is daarom overgezet naar **Berekenen en beregenen**.\n\nUw zones worden beregend zoals voorheen, op hetzelfde moment: de starttrigger is een schema van het programma **Bewatering** geworden, op het nieuwe tabblad **Bewatering**. Kies **Alleen berekenen** als Smart Irrigation de kleppen niet meer moet openen."
+          }
+        }
+      }
     }
   }
 }

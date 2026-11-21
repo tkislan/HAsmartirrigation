@@ -38,19 +38,7 @@
           "waiting": "Venter",
           "running": "Kører",
           "paused": "På pause",
-          "suspended": "Suspenderet",
-          "disabled": "Deaktiveret"
-        }
-      },
-      "program_main": {
-        "name": "Hovedprogram",
-        "state": {
-          "idle": "Inaktiv",
-          "waiting": "Venter",
-          "running": "Kører",
-          "paused": "På pause",
-          "suspended": "Suspenderet",
-          "disabled": "Deaktiveret"
+          "suspended": "Suspenderet"
         }
       }
     },
@@ -113,6 +101,12 @@
       },
       "any_problem": {
         "name": "Problem"
+      },
+      "leak": {
+        "name": "Lækage"
+      },
+      "observed_watering": {
+        "name": "Observeret vanding"
       }
     },
     "switch": {
@@ -144,20 +138,13 @@
     }
   },
   "options": {
-    "error": {
-      "invalid_coordinates": "Ugyldige koordinater angivet. Kontrollér venligst breddegrad (-90 til 90) og længdegrad (-180 til 180)."
-    },
     "step": {
-      "coordinates": {
-        "title": "Placeringskoordinater",
-        "description": "Konfigurér placeringskoordinater til hentning af vejrdata. Du kan om nødvendigt bruge manuelle koordinater, der adskiller sig fra din Home Assistant-placering.",
-        "data": {
-          "manual_coordinates_enabled": "Brug manuelle koordinater i stedet for Home Assistant-placering",
-          "manual_latitude": "Breddegrad (decimalgrader, -90 til 90)",
-          "manual_longitude": "Længdegrad (decimalgrader, -180 til 180)",
-          "manual_elevation": "Højde over havets overflade (meter, valgfrit)"
-        }
+      "init": {
+        "title": "Smart Irrigation"
       }
+    },
+    "abort": {
+      "use_panel": "Smart Irrigation indstilles i sit eget panel: åbn Smart Irrigation i sidepanelet. Stedet, som vejret hentes for, findes under Vejr › Vejrtjeneste (tilstand: Avanceret)."
     }
   },
   "services": {
@@ -325,7 +312,7 @@
     },
     "run_program": {
       "name": "Kør program",
-      "description": "Kør et program i den fulde styring nu, eller så snart det er dets tur, når et andet kører. Programmet vander sine zoner med de varigheder, Smart Irrigation har beregnet, medmindre dets trin siger noget andet.",
+      "description": "Kør et program nu, eller så snart det er dets tur, når et andet kører. Programmet vander sine zoner med de varigheder, Smart Irrigation har beregnet, medmindre dets trin siger noget andet.",
       "fields": {
         "program_id": {
           "name": "Program",
@@ -343,7 +330,7 @@
     },
     "stop_program": {
       "name": "Stop program",
-      "description": "Stop ét program. Hvis det kører, lukkes dets åbne zoner på normal vis og godskrives for det, de gav; hvis det venter på sin tur, tages det ud af køen. Et ukendt program gør intet. Hovedprogrammet stoppes med stop_watering.",
+      "description": "Stop ét program. Hvis det kører, lukkes dets åbne zoner på normal vis og godskrives for det, de gav; hvis det venter på sin tur, tages det ud af køen. Et ukendt program gør intet. Al vanding stoppes med stop_watering.",
       "fields": {
         "program_id": {
           "name": "Program",
@@ -352,8 +339,8 @@
       }
     },
     "set_program_enabled": {
-      "name": "Aktivér eller deaktivér et program",
-      "description": "Slå et program i den fulde styring til eller fra, som kontakten i dets indstillinger gør.",
+      "name": "Slå alle tidsplaner for et program til eller fra (forældet)",
+      "description": "Forældet: slår alle tidsplaner for et program til eller fra. Et program har ikke længere sin egen tænd/sluk; brug set_schedule_enabled til én tidsplan. Fjernes i 2027.11.",
       "fields": {
         "program_id": {
           "name": "Program",
@@ -443,7 +430,7 @@
     },
     "adjust_program": {
       "name": "Justér et program",
-      "description": "Få et program i den fulde styring til at vande længere eller kortere i et stykke tid. Justeringen erstatter den forrige (den lægges aldrig sammen), gælder for de kørsler, der starter efter den er sat, og slutter efter de angivne timer.",
+      "description": "Få et program til at vande længere eller kortere i et stykke tid. Justeringen erstatter den forrige (den lægges aldrig sammen), gælder for de kørsler, der starter efter den er sat, og slutter efter de angivne timer.",
       "fields": {
         "program_id": {
           "name": "Program",
@@ -761,9 +748,39 @@
       "title": "Handlingen {action} forsvinder",
       "description": "En automatisering, et script eller et dashboard kaldte **{action}**. Den virker stadig, men den fjernes fra version {version}, om vinteren, uden for vandingssæsonen.\n\nBrug **{replacement}** i stedet: den gør det samme, og for alle zoner, når ingen zone er valgt. Denne besked kommer igen ved hvert kald til det gamle navn, indtil der ikke er flere."
     },
+    "deprecated_program_enabled": {
+      "title": "Handlingen {action} forsvinder",
+      "description": "En automatisering, et script eller et dashboard kaldte **{action}**. Et program har ikke længere sin egen tænd/sluk, så den slår nu alle programmets tidsplaner til eller fra. Den fjernes fra version {version}, om vinteren, uden for vandingssæsonen.\n\nBrug **{replacement}** i stedet, én gang pr. tidsplan. Denne besked kommer igen ved hvert kald af det gamle navn, indtil der ikke er flere."
+    },
     "deprecated_recurring_schedule": {
       "title": "Tilbagevendende tidsplaner forsvinder: {action}",
       "description": "En automatisering, et script eller et dashboard kaldte **{action}**. Tilbagevendende tidsplaner virker stadig, men de fjernes fra version {version}, om vinteren, uden for vandingssæsonen.\n\nProgrammernes tidsplaner gør det samme og findes i panelet: opsæt dem under **Vanding**, og fjern derefter de tilbagevendende tidsplaner og kaldene til {action}."
+    },
+    "zone_set_aside": {
+      "title": "Zone {zone} er sat til side",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Tag zone {zone} i brug igen",
+            "description": "Ventilen i zone **{zone}** fejlede {count} gange i træk (åbnede ikke, gav intet vand, eller dens timer kunne ikke sættes), så Smart Irrigation holdt op med at vande den.\n\nTjek ventilen, strøm eller batterier og vandtilførslen. Zonen kommer selv tilbage, når dens ventil ses åbne, fx prøvet i hånden. Eller tag den i brug nu.\n\nSmart Irrigation vander zone {zone} igen fra næste vanding og tæller fejlene fra nul."
+          }
+        }
+      }
+    },
+    "leak": {
+      "title": "Der løber vand med alle ventiler lukket",
+      "description": "Måleren **{meter}** talte {litres} L, mens alle ventiler i {zones} var lukket. Et rør lækker måske, eller en ventil hænger åben.\n\nMeldingen forsvinder af sig selv, når måleren har stået stille en halv time. Hændelsen `smart_irrigation_leak` og Lækage-sensoren lader en automatisering lukke en hovedventil."
+    },
+    "moved_to_calculate_and_water": {
+      "title": "Direkte ventilstyring hedder nu \"Beregn og vand\"",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Din vanding fortsætter som før",
+            "description": "Smart Irrigation har nu én indstilling for, hvad det gør: **Beregn og vand**, **Kun beregn** eller **Stop alt**, under fanen Indstillinger. Din installation åbnede selv ventilerne og er derfor flyttet til **Beregn og vand**.\n\nDine zoner vandes som før, på samme tidspunkt: starttriggeren er blevet en tidsplan for programmet **Vanding** under den nye fane **Vanding**. Vælg **Kun beregn**, hvis Smart Irrigation ikke længere skal åbne ventilerne."
+          }
+        }
+      }
     }
   }
 }

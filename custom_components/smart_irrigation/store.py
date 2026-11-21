@@ -56,6 +56,7 @@ from .const import (
     CONF_DEFAULT_IRRIGATION_ENABLED,
     CONF_DEFAULT_IRRIGATION_START_TRIGGERS,
     CONF_DEFAULT_IRRIGATION_THRESHOLD,
+    CONF_DEFAULT_LEAK_ALERT_LITRES,
     CONF_DEFAULT_MAXIMUM_BUCKET,
     CONF_DEFAULT_MAXIMUM_DURATION,
     CONF_DEFAULT_OBSERVED_WATERING_ENABLED,
@@ -67,6 +68,7 @@ from .const import (
     CONF_DEFAULT_RECURRING_SCHEDULES,
     CONF_DEFAULT_SEASONAL_ADJUSTMENTS,
     CONF_DEFAULT_SENSOR_DEBOUNCE,
+    CONF_DEFAULT_SET_ASIDE_AFTER,
     CONF_DEFAULT_SKIP_IRRIGATION_ON_PRECIPITATION,
     CONF_DEFAULT_SKIP_ON_FREEZE,
     CONF_DEFAULT_SKIP_ON_RAIN_SENSOR,
@@ -75,6 +77,7 @@ from .const import (
     CONF_DEFAULT_SOIL_MOISTURE_THRESHOLD,
     CONF_DEFAULT_SUPPLIES,
     CONF_DEFAULT_USE_WEATHER_SERVICE,
+    CONF_DEFAULT_WATERING_ENABLED,
     CONF_DEFAULT_WATERING_PASSES,
     CONF_DEFAULT_WEATHER_SERVICE,
     CONF_DEFAULT_ZONE_INPUT_METHOD,
@@ -94,15 +97,19 @@ from .const import (
     CONF_IRRIGATION_START_TRIGGERS,
     CONF_IU_IMPORT,
     CONF_LAST_ZONE_ID,
+    CONF_LEAK_ALERT_LITRES,
+    CONF_MAIN_PROGRAM_CONVERTED,
     CONF_MANUAL_COORDINATES_ENABLED,
     CONF_MANUAL_ELEVATION,
     CONF_MANUAL_LATITUDE,
     CONF_MANUAL_LONGITUDE,
     CONF_METRIC,
     CONF_OBSERVED_WATERING_ENABLED,
+    CONF_ONE_CHOICE_MIGRATED,
     CONF_PAUSE_BETWEEN_ZONES,
     CONF_PAUSE_UNTIL,
     CONF_PAUSED_OWED,
+    CONF_PENDING_CHAINED_STARTS,
     CONF_POSTPONE_UNTIL,
     CONF_PRECIPITATION_THRESHOLD_MM,
     CONF_PROGRAM_ADJUSTMENTS,
@@ -116,6 +123,7 @@ from .const import (
     CONF_RECURRING_SCHEDULES,
     CONF_SEASONAL_ADJUSTMENTS,
     CONF_SENSOR_DEBOUNCE,
+    CONF_SET_ASIDE_AFTER,
     CONF_SKIP_IRRIGATION_ON_PRECIPITATION,
     CONF_SKIP_ON_FREEZE,
     CONF_SKIP_ON_RAIN_SENSOR,
@@ -128,6 +136,7 @@ from .const import (
     CONF_UI_MODE_STANDARD,
     CONF_UNITS,
     CONF_USE_WEATHER_SERVICE,
+    CONF_WATERING_ENABLED,
     CONF_WATERING_PASSES,
     CONF_WEATHER_SERVICE,
     CONF_WEATHER_SERVICE_OWM,
@@ -135,9 +144,11 @@ from .const import (
     CONF_WIND_SENSOR,
     CONF_WIND_THRESHOLD,
     CONF_ZONE_ENGINES_SPLIT,
+    CONF_ZONE_FAILURES,
     CONF_ZONE_SEQUENCING,
     DOMAIN,
     HISTORY_DURATION,
+    HISTORY_PROGRAM_ID,
     HISTORY_START,
     HISTORY_WATER_USED,
     HISTORY_ZONE_ID,
@@ -223,11 +234,14 @@ from .const import (
     ZONE_MULTIPLIER,
     ZONE_NAME,
     ZONE_NUMBER_OF_DATA_POINTS,
+    ZONE_OBSERVED_IGNORE_SECONDS,
     ZONE_OPEN_RESENDS,
     ZONE_PLANT_TYPE,
     ZONE_PRECIPITATION_RATE,
     ZONE_PRECIPITATION_SUPERSEDED,
+    ZONE_SAFETY_OFF_ENTITY,
     ZONE_SAFETY_OFF_MODE,
+    ZONE_SAFETY_OFF_REQUIRED,
     ZONE_SAFETY_OFF_STATE_KEY,
     ZONE_SAFETY_OFF_TOPIC,
     ZONE_SIZE,
@@ -328,6 +342,9 @@ class ZoneEntry:
     safety_off_topic = attr.ib(type=str, default=None)
     safety_off_state_key = attr.ib(type=str, default=None)
     safety_off_mode = attr.ib(type=str, default=None)
+    # The valve's own duration, set before each open (see const).
+    safety_off_entity = attr.ib(type=str, default=None)
+    safety_off_required = attr.ib(type=bool, default=None)
     # How long the valves are given to confirm, and how often the open is sent
     # again meanwhile (see ZONE_CONFIRM_TIMEOUT). None keeps the defaults.
     confirm_timeout = attr.ib(type=float, default=None)
@@ -363,6 +380,8 @@ class ZoneEntry:
     precipitation_superseded = attr.ib(type=float, default=0.0)
     # Optional cumulative volume meter; credits the bucket by measured volume.
     flow_sensor = attr.ib(type=str, default=None)
+    # Observed runs this short or shorter are not credited (see const).
+    observed_ignore_seconds = attr.ib(type=float, default=None)
     # Optional soil moisture sensor (%): the zone sits out a run while the
     # reading is at or above the threshold.
     soil_moisture_sensor = attr.ib(type=str, default=None)
@@ -637,6 +656,7 @@ class IrrigationHistoryEntry:
     zone_name = attr.ib(type=str, default=None)
     duration = attr.ib(type=float, default=0.0)
     water_used = attr.ib(type=float, default=0.0)
+    program_id: str | None = attr.ib(default=None)
 
 
 @attr.s(slots=True, frozen=True)
@@ -738,6 +758,7 @@ class Config:
     # Full controller mode and its programs (see programs.py).
     full_controller = attr.ib(type=bool, default=CONF_DEFAULT_FULL_CONTROLLER)
     irrigation_enabled = attr.ib(type=bool, default=CONF_DEFAULT_IRRIGATION_ENABLED)
+    watering_enabled = attr.ib(type=bool, default=CONF_DEFAULT_WATERING_ENABLED)
     programs = attr.ib(
         type=list, default=attr.Factory(lambda: list(CONF_DEFAULT_PROGRAMS))
     )
@@ -758,12 +779,20 @@ class Config:
     pause_until = attr.ib(type=str, default=None)
     paused_owed = attr.ib(type=list, default=None)
     queued_manual_runs = attr.ib(type=list, default=None)
+    pending_chained_starts = attr.ib(type=list, default=None)
     program_adjustments = attr.ib(type=dict, default=None)
     suspensions = attr.ib(type=dict, default=None)
+    set_aside_after = attr.ib(type=int, default=CONF_DEFAULT_SET_ASIDE_AFTER)
+    zone_failures = attr.ib(type=dict, default=None)
+    leak_alert_litres = attr.ib(type=float, default=CONF_DEFAULT_LEAK_ALERT_LITRES)
     # What the last Irrigation Unlimited import created (iu_import_ha.py).
     iu_import = attr.ib(type=dict, default=None)
     # Direct valve control as it was before the full controller forced it on.
     direct_valve_control_before_full_controller = attr.ib(type=bool, default=None)
+    # Moved to the one choice of 2026.11 (one_choice.py).
+    one_choice_migrated = attr.ib(type=bool, default=False)
+    # The mark of the main program's conversion. deprecated: remove in 2027.11
+    main_program_converted = attr.ib(type=bool, default=False)
     # The highest zone id ever given. A new zone took the highest id in use
     # plus one, so deleting the last zone and adding one gave the new zone the
     # deleted one's id, and with it the deleted zone's entities: Home
@@ -1251,6 +1280,9 @@ class SmartIrrigationStorage:
                 irrigation_enabled=data["config"].get(
                     CONF_IRRIGATION_ENABLED, CONF_DEFAULT_IRRIGATION_ENABLED
                 ),
+                watering_enabled=data["config"].get(
+                    CONF_WATERING_ENABLED, CONF_DEFAULT_WATERING_ENABLED
+                ),
                 full_controller=data["config"].get(
                     CONF_FULL_CONTROLLER, CONF_DEFAULT_FULL_CONTROLLER
                 ),
@@ -1280,11 +1312,23 @@ class SmartIrrigationStorage:
                 pause_until=data["config"].get(CONF_PAUSE_UNTIL),
                 paused_owed=data["config"].get(CONF_PAUSED_OWED),
                 queued_manual_runs=data["config"].get(CONF_QUEUED_MANUAL_RUNS),
+                pending_chained_starts=data["config"].get(CONF_PENDING_CHAINED_STARTS),
                 program_adjustments=data["config"].get(CONF_PROGRAM_ADJUSTMENTS),
                 suspensions=data["config"].get(CONF_SUSPENSIONS),
+                set_aside_after=data["config"].get(
+                    CONF_SET_ASIDE_AFTER, CONF_DEFAULT_SET_ASIDE_AFTER
+                ),
+                zone_failures=data["config"].get(CONF_ZONE_FAILURES),
+                leak_alert_litres=data["config"].get(
+                    CONF_LEAK_ALERT_LITRES, CONF_DEFAULT_LEAK_ALERT_LITRES
+                ),
                 iu_import=data["config"].get(CONF_IU_IMPORT),
                 direct_valve_control_before_full_controller=data["config"].get(
                     CONF_DIRECT_VALVE_BEFORE_FULL_CONTROLLER
+                ),
+                one_choice_migrated=data["config"].get(CONF_ONE_CHOICE_MIGRATED, False),
+                main_program_converted=data["config"].get(
+                    CONF_MAIN_PROGRAM_CONVERTED, False
                 ),
                 last_zone_id=data["config"].get(CONF_LAST_ZONE_ID),
             )
@@ -1353,11 +1397,16 @@ class SmartIrrigationStorage:
                         safety_off_topic=zone.get(ZONE_SAFETY_OFF_TOPIC, None),
                         safety_off_state_key=zone.get(ZONE_SAFETY_OFF_STATE_KEY, None),
                         safety_off_mode=zone.get(ZONE_SAFETY_OFF_MODE, None),
+                        safety_off_entity=zone.get(ZONE_SAFETY_OFF_ENTITY, None),
+                        safety_off_required=zone.get(ZONE_SAFETY_OFF_REQUIRED, None),
                         confirm_timeout=zone.get(ZONE_CONFIRM_TIMEOUT, None),
                         open_resends=zone.get(ZONE_OPEN_RESENDS, None),
                         supply_id=zone.get(ZONE_SUPPLY_ID, None),
                         extra_entities=zone.get(ZONE_EXTRA_ENTITIES, None),
                         flow_sensor=zone.get(ZONE_FLOW_SENSOR, None),
+                        observed_ignore_seconds=zone.get(
+                            ZONE_OBSERVED_IGNORE_SECONDS, None
+                        ),
                         soil_moisture_sensor=zone.get(ZONE_SOIL_MOISTURE_SENSOR, None),
                         soil_moisture_threshold=zone.get(
                             ZONE_SOIL_MOISTURE_THRESHOLD,
@@ -1444,6 +1493,7 @@ class SmartIrrigationStorage:
                         zone_name=run.get(HISTORY_ZONE_NAME),
                         duration=run.get(HISTORY_DURATION, 0.0),
                         water_used=run.get(HISTORY_WATER_USED, 0.0),
+                        program_id=run.get(HISTORY_PROGRAM_ID),
                     )
                 )
 

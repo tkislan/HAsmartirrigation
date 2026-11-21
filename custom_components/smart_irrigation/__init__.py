@@ -34,6 +34,9 @@ from homeassistant.helpers import (
 from homeassistant.helpers import (
     entity_registry as er,
 )
+from homeassistant.helpers import (
+    issue_registry as ir,
+)
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.dispatcher import (
     async_dispatcher_connect,
@@ -62,6 +65,7 @@ from .calc_problem import (
 )
 from .calculation import CalculationMixin
 from .card import async_register_card
+from .delivery import daily_calculation_on
 from .deprecated_actions import deprecated
 from .engine_binding import EngineBindingMixin
 from .entity import device_by_identifier
@@ -78,16 +82,27 @@ from .helpers import (
     relative_to_absolute_pressure,
 )
 from .hourly_et import solar_elevation_sin
+from .leak_watch import LeakWatchMixin
 from .live_estimate import LiveEstimateMixin
 from .liveness import WeatherLivenessMixin
-from .master_switch import irrigation_off
+from .llm_api import async_sync_llm_api
+from .master_switch import irrigation_off, watering_off
 from .observed_watering import ObservedWateringMixin
+from .one_choice import (
+    ISSUE_MOVED,
+    first_program,
+    migration_changes,
+    moved_the_valves,
+)
 from .panel import async_register_panel, remove_panel
 from .program_adjust import ADJUST_PROGRAM_SCHEMA
+from .program_migration import conversion_changes
+from .program_notify import async_setup_program_notify
 from .program_scheduler import ProgramSchedulerMixin
-from .programs import ensure_main_program, normalize_programs
+from .programs import LastProgramError, check_program_chains, normalize_programs
 from .scheduler import RecurringScheduleManager, SeasonalAdjustmentManager
 from .service_handlers import ServiceHandlersMixin
+from .set_aside import SetAsideMixin
 from .skip_conditions import SkipConditionsMixin, thresholds_for_storage
 from .store import DATA_REGISTRY, SmartIrrigationStorage, async_get_registry
 from .supplies import normalize_supplies
@@ -95,6 +110,7 @@ from .triggers import TriggersMixin
 from .valve_runner import ValveRunnerMixin
 from .watering_calendar import WateringCalendarMixin
 from .watering_control import (
+    NEXT_STEP_SCHEMA,
     PAUSE_WATERING_SCHEMA,
     RUN_PROGRAM_SCHEMA,
     SET_PROGRAM_ENABLED_SCHEMA,
@@ -366,6 +382,55 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     # keeping its entity_id and recorded history. Idempotent on later setups.
     await _migrate_duration_unique_ids(hass, entry, store)
 
+    # Moved once to the one choice of 2026.11, before anything is armed: it
+    # keeps watering as it did (one_choice.py). Before the platforms are set
+    # up, since setting them up arms the start: after it, the first start after
+    # the update armed the 10.10 start trigger and could start its run, and the
+    # programs' schedules were only armed at the next calculation.
+    try:
+        changes = migration_changes(coordinator.store.config)
+        if changes:
+            await coordinator.store.async_update_config(changes)
+            if len(changes) > 1:
+                _LOGGER.info(
+                    "Moved to the single setting of what Smart Irrigation does: %s",
+                    ", ".join(sorted(k for k in changes if k != "one_choice_migrated")),
+                )
+            if moved_the_valves(changes):
+                # Said once, on the Repairs page: the watering goes on as it
+                # did, now from the Watering tab.
+                ir.async_create_issue(
+                    hass,
+                    const.DOMAIN,
+                    ISSUE_MOVED,
+                    is_fixable=True,
+                    is_persistent=True,
+                    severity=ir.IssueSeverity.WARNING,
+                    translation_key=ISSUE_MOVED,
+                )
+    except Exception as err:  # noqa: BLE001 - never hold the setup up
+        _LOGGER.warning("Could not move to the single setting yet: %s", err)
+
+    # The main program converted once into an ordinary program with steps that
+    # water as its cycle did, and "Program on" into the program's schedules
+    # (program_migration.py), after the move above, which may give the main
+    # program its schedule. deprecated: remove in 2027.11
+    try:
+        changes = conversion_changes(
+            coordinator.store.config,
+            await coordinator.store.async_get_zones(),
+            hass.config.language,
+        )
+        if changes:
+            await coordinator.store.async_update_config(changes)
+            if const.CONF_PROGRAMS in changes:
+                _LOGGER.info(
+                    "Programs converted: the main program is an ordinary program "
+                    "with steps now, and no program has a switch of its own"
+                )
+    except Exception as err:  # noqa: BLE001 - never hold the setup up
+        _LOGGER.warning("Could not convert the main program yet: %s", err)
+
     _LOGGER.info("Calling async_forward_entry_setups")
     await hass.config_entries.async_forward_entry_setups(
         entry,
@@ -438,6 +503,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     # Full controller: once everything is up, a valve left open that no run owns
     # is closed. Later than the resume, because entities load at their own pace.
     async_at_started(hass, coordinator.async_align_valves)
+    # Offered to assistants: Home Assistant's MCP server or a conversation
+    # agent uses it once the user ticks Smart Irrigation there (llm_api.py).
+    async_sync_llm_api(hass, True)
+    # Full controller: the programs that name someone to tell (program_notify.py).
+    entry.async_on_unload(async_setup_program_notify(hass, coordinator).stop)
+    # A zone whose valve keeps failing, set aside when asked (set_aside.py).
+    coordinator.async_setup_set_aside()
+    entry.async_on_unload(coordinator.async_teardown_set_aside)
+    # The meters between the runs (leak_watch.py), set up with the observer.
+    entry.async_on_unload(coordinator.async_teardown_leak_watch)
     return True
 
 
@@ -499,6 +574,7 @@ async def async_unload_entry(hass: HomeAssistant, entry):
         return False
 
     remove_panel(hass)
+    async_sync_llm_api(hass, False)
     coordinator = hass.data[const.DOMAIN]["coordinator"]
     await coordinator.async_unload()
     return True
@@ -534,6 +610,7 @@ def wind_at_two_metres(speed, height_m):
 
 class SmartIrrigationCoordinator(
     EngineBindingMixin,
+    LeakWatchMixin,
     ObservedWateringMixin,
     FlowCalibrationMixin,
     LiveEstimateMixin,
@@ -544,6 +621,7 @@ class SmartIrrigationCoordinator(
     ProgramSchedulerMixin,
     SkipConditionsMixin,
     ServiceHandlersMixin,
+    SetAsideMixin,
     TriggersMixin,
     WateringCalendarMixin,
     CalculationMixin,
@@ -693,29 +771,35 @@ class SmartIrrigationCoordinator(
                 const.START_EVENT_FIRED_TODAY: False,
                 const.START_EVENT_FIRED_ON: None,
             }
-            # The timers below are handed this copy and write it back whole:
-            # it has to say the same, or it puts the old flag back.
             the_config.update(cleared)
             hass.async_create_task(self.store.async_update_config(dict(cleared)))
 
+        # Fire-and-forget: the timers are set up in the background, from this
+        # copy of the configuration. They only set timers up and store nothing:
+        # the copy is older than what the setup stores meanwhile, and written
+        # back whole it undid it. With "clear weather data" on (the 10.10
+        # default) the first start after the update to 2026.11 lost the move to
+        # the one choice that way: the 10.10 start trigger was armed, and the
+        # move was made again at every start.
         if the_config[const.CONF_AUTO_UPDATE_ENABLED]:
-            # Fire-and-forget: schedule auto update timer setup in background
-            hass.loop.create_task(self.set_up_auto_update_time(the_config))
-        if the_config[const.CONF_AUTO_CALC_ENABLED]:
-            # Fire-and-forget: schedule auto calc timer setup in background
-            hass.loop.create_task(self.set_up_auto_calc_time(the_config))
+            hass.loop.create_task(self.set_up_auto_update_time(the_config, save=False))
+        if daily_calculation_on(the_config):
+            hass.loop.create_task(self.set_up_auto_calc_time(the_config, save=False))
         if the_config[const.CONF_AUTO_CLEAR_ENABLED]:
-            # Fire-and-forget: schedule auto clear timer setup in background
-            hass.loop.create_task(self.set_up_auto_clear_time(the_config))
+            hass.loop.create_task(self.set_up_auto_clear_time(the_config, save=False))
 
         # Names of triggers that have already fired today, so each trigger fires
         # independently (replaces the old single global "fired today" block).
         # In-memory; cleared at midnight.
         self._fired_triggers_today: set = set()
-        # Today's watering decision (precipitation forecast + days-between),
-        # computed once and shared by all triggers for the day:
-        # None = undecided, True = water, False = skip.
+        # Today's decision on the conditions about the day (rain forecast,
+        # days between irrigation), made at the first start and kept for the
+        # day: None = undecided, True = they let it water, False = one vetoes.
+        # The conditions of the moment (frost, wind, rain sensor, postponement)
+        # are judged at each start instead (triggers._prepare_watering_for_today).
         self._watering_decision_today = True if self._start_event_fired_today else None
+        # The checks behind it, {check id: check}, or None until it is made.
+        self._day_checks: dict | None = None
         # The structured result of the most recent real watering decision, so
         # the panel can say why a run was skipped rather than only that it was.
         # None until one has been made, and after a restart.
@@ -842,12 +926,12 @@ class SmartIrrigationCoordinator(
 
         _LOGGER.info("Unit system change processing complete")
 
-    def _full_controller_changes(self, data: dict) -> dict:
+    async def _full_controller_changes(self, data: dict) -> dict:
         """What switching the full controller on carries with it.
 
         It drives the valves itself, so direct valve control goes on, and it
-        needs its main program, made from the settings that run the watering
-        today. Switching it off puts direct valve control back as it was before
+        needs a program when there is none, made from the settings that run the
+        watering today (one_choice.first_program). Switching it off puts direct valve control back as it was before
         (the programs stay stored for the day it is switched on again), and what
         ran before runs again.
         """
@@ -877,9 +961,16 @@ class SmartIrrigationCoordinator(
             data[const.CONF_DIRECT_VALVE_BEFORE_FULL_CONTROLLER] = current is True
         data[const.CONF_DIRECT_VALVE_CONTROL_ENABLED] = True
         stored = getattr(self.store.config, const.CONF_PROGRAMS, None)
-        data[const.CONF_PROGRAMS] = ensure_main_program(
-            data.get(const.CONF_PROGRAMS, stored)
-        )
+        programs = data.get(const.CONF_PROGRAMS, stored)
+        if not programs:
+            # Nothing would water: a first program with the zones that have a
+            # valve, started at the moment the start trigger had.
+            data[const.CONF_PROGRAMS] = first_program(
+                config,
+                await self.store.async_get_zones(),
+                programs,
+                getattr(self.hass.config, "language", None),
+            )
         return data
 
     def _programs_changes(self, data: dict) -> dict:
@@ -907,6 +998,12 @@ class SmartIrrigationCoordinator(
             program_id, _, schedule_id = str(key).partition(":")
             reserved.setdefault(program_id, set()).add(schedule_id)
         programs = normalize_programs(data[const.CONF_PROGRAMS], reserved)
+        if not programs and any(isinstance(p, dict) for p in old_programs or []):
+            # The last program stays (programs.LastProgramError).
+            raise LastProgramError
+        # A loop of programs starting each other, or a program deleted while
+        # another starts after it (programs.ProgramChainError).
+        check_program_chains(programs, old_programs)
         data = {**data, const.CONF_PROGRAMS: programs}
         alive = {
             f"{p.get(const.PROGRAM_ID)}:{s.get(const.SCHEDULE_ID)}"
@@ -978,7 +1075,7 @@ class SmartIrrigationCoordinator(
                         threshold_value,
                     )
 
-        data = self._full_controller_changes(data)
+        data = await self._full_controller_changes(data)
         if const.CONF_PROGRAMS in data:
             data = self._programs_changes(data)
         if const.CONF_SUPPLIES in data:
@@ -991,9 +1088,10 @@ class SmartIrrigationCoordinator(
         # schedulers below already write the changes to the store.
         was_full = getattr(self.store.config, const.CONF_FULL_CONTROLLER, False) is True
         was_off = irrigation_off(self.store)
+        was_watering = not watering_off(self.store)
         # Who starts the main program's cycle (its own schedules, or the start
         # trigger) before and after this change.
-        was_scheduled = self.main_program_uses_schedules()
+        was_scheduled = self.schedules_start_watering()
         # handle auto calc changes
         await self.set_up_auto_calc_time(data)
         # handle auto update changes, includings updating OWMClient cache settings
@@ -1005,7 +1103,7 @@ class SmartIrrigationCoordinator(
             # counted, or the first calculation would take weeks at once.
             await self._start_windows_now()
         await self.store.async_update_config(data)
-        start_source_changed = self.main_program_uses_schedules() != was_scheduled
+        start_source_changed = self.schedules_start_watering() != was_scheduled
         if was_full and data.get(const.CONF_FULL_CONTROLLER) is False:
             # Switched off: the extra valves of the zones not running are
             # closed once, the alignment having nothing to do while it is off.
@@ -1039,9 +1137,10 @@ class SmartIrrigationCoordinator(
         ):
             _LOGGER.debug("calling register start event from async_update_config")
             await self.register_start_event()
-        if not was_off and data.get(const.CONF_IRRIGATION_ENABLED) is False:
-            # Switched off: whatever is watering or waiting stops now.
-            _LOGGER.info("Smart Irrigation switched off: everything watering stops")
+        if was_watering and watering_off(self.store):
+            # Switched off, or to calculating only: whatever is watering or
+            # waiting stops now.
+            _LOGGER.info("Smart Irrigation no longer waters: everything watering stops")
             await self.async_stop_watering()
         async_dispatcher_send(self.hass, const.DOMAIN + "_config_updated")
 
@@ -1219,7 +1318,7 @@ class SmartIrrigationCoordinator(
                 schedule,
             )
 
-    async def set_up_auto_update_time(self, data):  # noqa: D102
+    async def set_up_auto_update_time(self, data, save=True):  # noqa: D102
         # WIP v2024.6.X:
         # experiment to use subscriptions to catch all updates instead of just on a time schedule
         # Read from the whole configuration: with only the changed field,
@@ -1299,7 +1398,8 @@ class SmartIrrigationCoordinator(
             # left, an update asked for by hand got a reading up to that old.
             if self._WeatherServiceClient:
                 self._WeatherServiceClient.cache_seconds = 0
-            await self.store.async_update_config(data)
+            if save:
+                await self.store.async_update_config(data)
 
     async def update_subscriptions(self, config=None):
         """Update sensor subscriptions for Smart Irrigation coordinator."""
@@ -1443,6 +1543,7 @@ class SmartIrrigationCoordinator(
 
         # get the mapping that uses this sensor
         mappings = await self.store.async_get_mappings()
+        recorded = False
         for mapping in mappings:
             if not mapping.get(const.MAPPING_MAPPINGS):
                 continue
@@ -1482,6 +1583,7 @@ class SmartIrrigationCoordinator(
                 await self.store.async_update_mapping(
                     mapping.get(const.MAPPING_ID), changes
                 )
+                recorded = True
                 _LOGGER.debug(
                     "[async_sensor_state_changed]: updated sensor group %s %s",
                     mapping.get(const.MAPPING_ID),
@@ -1531,6 +1633,12 @@ class SmartIrrigationCoordinator(
                     mapping_id,
                 )
                 await self.async_continuous_update_for_mapping(mapping_id)
+
+        if recorded:
+            # The Info page reads this reading at its next refresh, the live
+            # bucket entities only heard of it at the next group update, often
+            # the hourly weather fetch (#1052). Throttled, see live_estimate.py.
+            self.async_request_live_refresh()
 
     async def async_continuous_update_for_mapping(self, mapping_id):
         """Perform a continuous update for a specific mapping if it does not use a weather service.
@@ -1725,14 +1833,19 @@ class SmartIrrigationCoordinator(
         """
         return {**self.store.get_config(), **(changes or {})}
 
-    async def set_up_auto_calc_time(self, data):
-        """Set up the automatic calculation time for Smart Irrigation based on configuration data."""
+    async def set_up_auto_calc_time(self, data, save=True):
+        """Set up the automatic calculation time for Smart Irrigation based on configuration data.
+
+        ``save``: store ``data`` too, as a settings change does; not at setup,
+        where ``data`` is a copy of the whole configuration.
+        """
         # Read the settings before touching the tracker. It used to be cancelled
         # first and the fields indexed after, so a caller sending only what it
         # changed raised a KeyError with the nightly calculation already gone,
         # and nothing re-registered it until a restart (#844).
         settings = self._settings(data)
-        enabled = settings.get(const.CONF_AUTO_CALC_ENABLED)
+        # "Just before each start" keeps the daily calculation as well.
+        enabled = daily_calculation_on(settings)
         calc_time = settings.get(const.CONF_CALC_TIME)
         # unsubscribe from any existing track_time_changes
         if self._track_auto_calc_time_unsub:
@@ -1765,9 +1878,10 @@ class SmartIrrigationCoordinator(
             if self._track_auto_calc_time_unsub:
                 self._track_auto_calc_time_unsub()
                 self._track_auto_calc_time_unsub = None
-            await self.store.async_update_config(data)
+            if save:
+                await self.store.async_update_config(data)
 
-    async def set_up_auto_clear_time(self, data):
+    async def set_up_auto_clear_time(self, data, save=True):
         """No longer schedules anything, and deliberately so.
 
         Clearing the weather data on a timer existed to stop the buffer growing
@@ -1795,7 +1909,8 @@ class SmartIrrigationCoordinator(
                 "calculation consumes what it uses and the buffer is pruned to "
                 "the zone that has read least. Nothing is lost by it being off"
             )
-        await self.store.async_update_config(data)
+        if save:
+            await self.store.async_update_config(data)
 
     async def track_update_time(self, *args):
         """Track and schedule periodic updates for Smart Irrigation based on configuration."""
@@ -2775,6 +2890,8 @@ class SmartIrrigationCoordinator(
         while self._debounced_update_cancel:
             _, cancel = self._debounced_update_cancel.popitem()
             cancel()
+        # and a planned refresh of the live estimates (#1052)
+        self.async_cancel_live_refresh()
 
         # stop watching linked valves (closed-loop bucket)
         self.async_teardown_observed_watering()
@@ -2790,6 +2907,9 @@ class SmartIrrigationCoordinator(
 
         # and the timers of the programs' schedules
         self.async_teardown_program_schedules()
+        # and the starts waiting for their offset after another program (they
+        # stay recorded, and the next start arms them again)
+        self.async_teardown_chained_starts()
 
         # Wait for the cancelled runs to have shut their valves and put their
         # pumps off, so the setup that follows a reload cannot resume a run
@@ -2895,7 +3015,13 @@ def register_services(hass: HomeAssistant):
     hass.services.async_register(
         const.DOMAIN,
         const.SERVICE_SET_PROGRAM_ENABLED,
-        coordinator.handle_set_program_enabled,
+        # Switches every schedule of the program now that a program has no
+        # on/off of its own; set_schedule_enabled replaces it.
+        deprecated(
+            hass,
+            const.SERVICE_SET_PROGRAM_ENABLED,
+            coordinator.handle_set_program_enabled,
+        ),
         schema=SET_PROGRAM_ENABLED_SCHEMA,
     )
     hass.services.async_register(
@@ -2920,7 +3046,10 @@ def register_services(hass: HomeAssistant):
         const.DOMAIN, const.SERVICE_RESUME_WATERING, coordinator.handle_resume_watering
     )
     hass.services.async_register(
-        const.DOMAIN, const.SERVICE_NEXT_STEP, coordinator.handle_next_step
+        const.DOMAIN,
+        const.SERVICE_NEXT_STEP,
+        coordinator.handle_next_step,
+        schema=NEXT_STEP_SCHEMA,
     )
     hass.services.async_register(
         const.DOMAIN,

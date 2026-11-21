@@ -38,19 +38,7 @@
           "waiting": "Várakozik",
           "running": "Fut",
           "paused": "Szünetel",
-          "suspended": "Felfüggesztve",
-          "disabled": "Letiltva"
-        }
-      },
-      "program_main": {
-        "name": "Főprogram",
-        "state": {
-          "idle": "Tétlen",
-          "waiting": "Várakozik",
-          "running": "Fut",
-          "paused": "Szünetel",
-          "suspended": "Felfüggesztve",
-          "disabled": "Letiltva"
+          "suspended": "Felfüggesztve"
         }
       }
     },
@@ -113,6 +101,12 @@
       },
       "any_problem": {
         "name": "Probléma"
+      },
+      "leak": {
+        "name": "Szivárgás"
+      },
+      "observed_watering": {
+        "name": "Megfigyelt öntözés"
       }
     },
     "switch": {
@@ -144,20 +138,13 @@
     }
   },
   "options": {
-    "error": {
-      "invalid_coordinates": "Érvénytelen koordináták. Kérjük, ellenőrizze a szélességi (-90 és 90 között) és a hosszúsági (-180 és 180 között) értékeket."
-    },
     "step": {
-      "coordinates": {
-        "title": "Helykoordináták",
-        "description": "Állítsa be a helykoordinátákat az időjárási adatok lekéréséhez. Szükség esetén a Home Assistant helyétől eltérő, kézi koordinátákat is használhat.",
-        "data": {
-          "manual_coordinates_enabled": "Kézi koordináták használata a Home Assistant helye helyett",
-          "manual_latitude": "Szélesség (tizedfok, -90 és 90 között)",
-          "manual_longitude": "Hosszúság (tizedfok, -180 és 180 között)",
-          "manual_elevation": "Tengerszint feletti magasság (méter, opcionális)"
-        }
+      "init": {
+        "title": "Smart Irrigation"
       }
+    },
+    "abort": {
+      "use_panel": "A Smart Irrigation a saját paneljén állítható be: nyisd meg a Smart Irrigationt az oldalsávban. A hely, amelyre az időjárás vonatkozik: Időjárás › Időjárás-szolgáltatás (mód: Haladó)."
     }
   },
   "services": {
@@ -325,7 +312,7 @@
     },
     "run_program": {
       "name": "Program futtatása",
-      "description": "A teljes vezérlő egy programjának futtatása most, vagy amint sorra kerül, ha egy másik program fut. A program a Smart Irrigation által kiszámított időtartamokkal öntözi a zónáit, hacsak a lépései mást nem írnak elő.",
+      "description": "Egy program futtatása most, vagy amint sorra kerül, ha egy másik program fut. A program a Smart Irrigation által kiszámított időtartamokkal öntözi a zónáit, hacsak a lépései mást nem írnak elő.",
       "fields": {
         "program_id": {
           "name": "Program",
@@ -343,7 +330,7 @@
     },
     "stop_program": {
       "name": "Program leállítása",
-      "description": "Egy program leállítása. Ha fut, a nyitott zónái a szokásos módon bezárulnak, és jóváíródik nekik a kijuttatott víz; ha a sorára vár, kikerül a sorból. Ismeretlen program esetén nem történik semmi. A főprogramot a stop_watering állítja le.",
+      "description": "Egy program leállítása. Ha fut, a nyitott zónái a szokásos módon bezárulnak, és jóváíródik nekik a kijuttatott víz; ha a sorára vár, kikerül a sorból. Ismeretlen program esetén nem történik semmi. A teljes öntözést a stop_watering állítja le.",
       "fields": {
         "program_id": {
           "name": "Program",
@@ -352,8 +339,8 @@
       }
     },
     "set_program_enabled": {
-      "name": "Program engedélyezése vagy letiltása",
-      "description": "A teljes vezérlő egy programjának be- vagy kikapcsolása, ahogy a beállításaiban lévő kapcsoló teszi.",
+      "name": "Egy program összes ütemezésének be- vagy kikapcsolása (elavult)",
+      "description": "Elavult: egy program összes ütemezését be- vagy kikapcsolja. A programnak már nincs saját kapcsolója; egy ütemezéshez használd a set_schedule_enabled műveletet. A 2027.11 verzióban megszűnik.",
       "fields": {
         "program_id": {
           "name": "Program",
@@ -443,7 +430,7 @@
     },
     "adjust_program": {
       "name": "Program módosítása",
-      "description": "A teljes vezérlő egy programjának hosszabb vagy rövidebb öntözése egy ideig. A módosítás felváltja az előzőt (sosem adódnak össze), a beállítása után induló futásokra vonatkozik, és a megadott órák után véget ér.",
+      "description": "Egy program hosszabb vagy rövidebb öntözése egy ideig. A módosítás felváltja az előzőt (sosem adódnak össze), a beállítása után induló futásokra vonatkozik, és a megadott órák után véget ér.",
       "fields": {
         "program_id": {
           "name": "Program",
@@ -761,9 +748,39 @@
       "title": "A(z) {action} művelet megszűnik",
       "description": "Egy automatizálás, szkript vagy irányítópult meghívta a(z) **{action}** műveletet. Még működik, de a(z) {version} verziótól el lesz távolítva, télen, az öntözési szezonon kívül.\n\nHasználd helyette a(z) **{replacement}** műveletet: ugyanazt teszi, és az összes zónára, ha nincs zóna kiválasztva. Ez az értesítés a régi név minden hívásakor visszatér, amíg egy sem marad."
     },
+    "deprecated_program_enabled": {
+      "title": "A(z) {action} művelet megszűnik",
+      "description": "Egy automatizálás, szkript vagy irányítópult meghívta: **{action}**. A programnak már nincs saját kapcsolója, ezért most a program összes ütemezését be- vagy kikapcsolja. A(z) {version} verziótól eltávolítjuk, télen, az öntözési szezonon kívül.\n\nHasználd helyette ezt: **{replacement}**, ütemezésenként egyszer. Ez az értesítés a régi név minden hívásakor visszatér, amíg egy sem marad."
+    },
     "deprecated_recurring_schedule": {
       "title": "Az ismétlődő ütemezések megszűnnek: {action}",
       "description": "Egy automatizálás, szkript vagy irányítópult meghívta a(z) **{action}** műveletet. Az ismétlődő ütemezések még működnek, de a(z) {version} verziótól el lesznek távolítva, télen, az öntözési szezonon kívül.\n\nA programok ütemezései ugyanezt teszik, és a panelen vannak: állítsd be őket az **Öntözés** alatt, majd távolítsd el az ismétlődő ütemezéseket és a(z) {action} hívásait."
+    },
+    "zone_set_aside": {
+      "title": "{zone} zóna félre van téve",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "{zone} zóna visszaállítása",
+            "description": "A(z) **{zone}** zóna szelepe {count}-szor egymás után hibázott (nem nyílt ki, nem adott vizet, vagy nem lehetett beállítani az időzítőjét), ezért a Smart Irrigation abbahagyta az öntözését.\n\nEllenőrizd a szelepet, a tápellátását vagy elemeit és a vízellátást. A zóna magától visszatér, ha a szelepe kinyílik, például kézzel kipróbálva. Vagy állítsd vissza most.\n\nA Smart Irrigation a következő öntözéstől újra öntözi a(z) {zone} zónát, és nulláról kezdi számolni a hibákat."
+          }
+        }
+      }
+    },
+    "leak": {
+      "title": "Víz folyik zárt szelepekkel",
+      "description": "A(z) **{meter}** óra {litres} L-t számolt, miközben {zones} minden szelepe zárva volt. Egy cső szivároghat, vagy egy szelep nyitva ragadt.\n\nA jelzés magától megszűnik, ha az óra fél órán át áll. A `smart_irrigation_leak` esemény és a Szivárgás érzékelő lehetővé teszi, hogy egy automatizálás elzárjon egy főszelepet."
+    },
+    "moved_to_calculate_and_water": {
+      "title": "A közvetlen szelepvezérlés most „Számol és öntöz”",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Az öntözés ugyanúgy folytatódik",
+            "description": "A Smart Irrigationnek most egyetlen beállítása van arra, amit csinál: **Számol és öntöz**, **Csak számol** vagy **Minden leállítása**, a Beállítások lapon. A telepítésed maga nyitotta a szelepeket, ezért átkerült a **Számol és öntöz** módba.\n\nA zónák ugyanúgy, ugyanabban az időpontban öntöződnek: az indító eseményből az **Öntözés** program ütemezése lett az új **Öntözés** lapon. Válaszd a **Csak számol** lehetőséget, ha a Smart Irrigation többé ne nyissa a szelepeket."
+          }
+        }
+      }
     }
   }
 }

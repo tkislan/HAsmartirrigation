@@ -22,14 +22,17 @@ import {
   calculationWhenKey,
   formatDuration,
   formatNumber,
+  displayVolume,
   localizedDateTime,
   navigate,
   output_unit,
+  unit_text,
 } from "../../helpers";
 import { globalStyle } from "../../styles/global-style";
 import { modernStyle } from "../../styles/modern-style";
 import { localize } from "../../../localize/localize";
-import { DOMAIN, ZONE_BUCKET } from "../../const";
+import { DOMAIN, ZONE_BUCKET, ZONE_WATER_VOLUME } from "../../const";
+import { nextRuns } from "../../data/next-runs";
 import {
   LiveState,
   liveValves,
@@ -50,8 +53,8 @@ import { askConfirmation } from "../../dialogs/confirmation-dialog";
 
 /**
  * The live state, with the programs the overview has running and the live
- * state does not: the main program run by the start trigger waters zone by
- * zone without a program run of its own, and was left out of the card.
+ * state does not (one finishing what a restart interrupted has no run of its
+ * own yet), which were left out of the card.
  */
 const withOverviewRuns = (state: any): LiveState | null => {
   const live: LiveState | null = state?.live ?? null;
@@ -84,10 +87,12 @@ class SmartIrrigationViewInfo extends SubscribeMixin(LitElement) {
   @property({ type: Array })
   private zones: SmartIrrigationZone[] = [];
 
-  // The main program's next start when its own schedules start it.
-  private mainScheduleStart: string | null = null;
-  // The soonest start of any program, with the full controller.
-  private nextProgram: { name: string; start: string } | null = null;
+  // With "Calculate and water", the soonest start of the programs' schedules:
+  // they start the watering, not the start trigger.
+  private programsStart: string | null = null;
+  // The runs of the next morning (or evening), in the order they will water,
+  // from the planning, with the full controller.
+  private nextRuns: any[] = [];
 
   @property({ type: Boolean })
   private isLoading = true;
@@ -181,38 +186,27 @@ class SmartIrrigationViewInfo extends SubscribeMixin(LitElement) {
       this.info = info;
       this.zones = zones;
       this._fetchRetries = 0;
-      // Started by the main program's schedules, the next start is theirs, not
-      // the one worked out from the start trigger.
-      this.mainScheduleStart = null;
-      this.nextProgram = null;
+      // Started by the programs' schedules, the next start is theirs, not the
+      // one worked out from the start trigger.
+      this.programsStart = null;
+      this.nextRuns = [];
       if ((config as any)?.full_controller === true) {
         try {
           const state = await this.hass!.callWS<any>({
             type: DOMAIN + "/programs_state",
           });
-          const programs = state?.programs || [];
-          const main = programs.find((p: any) => p.main);
-          if ((info as any)?.start_source === "main_schedules") {
-            this.mainScheduleStart = main?.next_start ?? null;
-          }
-          // The card above is the main program's run. Another program may
-          // start sooner, and was not mentioned anywhere on this page (#912):
-          // the soonest start of any program is named under it.
-          const soonest = programs
-            .filter((p: any) => p.next_start)
-            .sort(
-              (a: any, b: any) =>
-                Date.parse(a.next_start) - Date.parse(b.next_start),
-            )[0];
-          this.nextProgram = soonest
-            ? {
-                name:
-                  soonest.main && soonest.name === "Main program"
-                    ? localize("programs.main_name", this._lang)
-                    : soonest.name,
-                start: soonest.next_start,
-              }
-            : null;
+          const starts = (state?.programs || [])
+            .map((p: any) => p.next_start)
+            .filter((start: unknown): start is string => !!start)
+            .sort((a: string, b: string) => Date.parse(a) - Date.parse(b));
+          this.programsStart = starts[0] ?? null;
+          // The next runs are listed in the order they will water, each with
+          // what holds it back or makes it wait (UX walk of 13 Nov., Q11).
+          const planning = await this.hass!.callWS<any[]>({
+            type: DOMAIN + "/planning",
+            days: 2,
+          });
+          this.nextRuns = nextRuns(planning || [], Date.now());
         } catch (error) {
           console.error("Error fetching the programs' next starts:", error);
         }
@@ -355,9 +349,36 @@ class SmartIrrigationViewInfo extends SubscribeMixin(LitElement) {
     if (!wateringNow(live)) return html``;
     const paused = live?.paused === true;
     const valves = liveValves(live);
+    const soaking = live?.soaking || [];
+    const starting = live?.starting || [];
     const programs = (live?.programs || []).filter(
       (p) => p.state === "running",
     );
+    // Waiting their turn behind this run: a toast said so, then nothing did
+    // (UX walk of 13 Nov., Q8).
+    const waiting = (live?.programs || []).filter((p) => p.state === "waiting");
+    const programName = (p: { program_id?: string; name?: string | null }) =>
+      p.name || this.t("cards.running.program");
+    // With no valve open, "watering" was wrong: the zones soak between two
+    // passes, or the pump is coming up (UX walk of 13 Nov., Q6, Q18).
+    const headline = paused
+      ? "cards.running.headline-paused"
+      : valves.length
+        ? "cards.running.headline"
+        : starting.length
+          ? "cards.running.headline-starting"
+          : soaking.length
+            ? "cards.running.headline-soaking"
+            : "cards.running.headline";
+    const zoneLink = (zoneId: number, name?: string | null) =>
+      html`<a
+        href="/${DOMAIN}/zones/zone/${zoneId}"
+        @click=${(e: Event) => {
+          e.preventDefault();
+          navigate(this, `/${DOMAIN}/zones/zone/${zoneId}`);
+        }}
+        >${name}</a
+      >`;
     const control = async (service: string) => {
       await this.hass!.callService(DOMAIN, service, {});
       this._fetchLive();
@@ -376,13 +397,7 @@ class SmartIrrigationViewInfo extends SubscribeMixin(LitElement) {
             icon=${paused ? "mdi:pause-circle-outline" : "mdi:water"}
           ></ha-icon>
           <div class="hero-text">
-            <div class="hero-headline">
-              ${this.t(
-                paused
-                  ? "cards.running.headline-paused"
-                  : "cards.running.headline",
-              )}
-            </div>
+            <div class="hero-headline">${this.t(headline)}</div>
             ${paused && live?.paused_until
               ? html`<div class="hero-sub">
                   ${this.t(
@@ -395,35 +410,79 @@ class SmartIrrigationViewInfo extends SubscribeMixin(LitElement) {
                   )}
                 </div>`
               : ""}
-            ${valves.map(
-              (valve) => html`
-                <div class="hero-sub">
-                  <a
-                    href="/${DOMAIN}/zones/zone/${valve.zone_id}"
-                    @click=${(e: Event) => {
-                      e.preventDefault();
-                      navigate(this, `/${DOMAIN}/zones/zone/${valve.zone_id}`);
-                    }}
-                    >${valve.zone}</a
-                  >:
+            ${valves.map((shown) => {
+              const valve = shown as any;
+              // The whole zone's time and water, its pass, and the volume it
+              // stops at: "58 s (3 %)" was the pass alone (Q7, Q24).
+              const bits = [
+                this.t(
+                  "cards.running.left",
+                  "{time}",
+                  remainingDuration(valve.remaining_seconds),
+                  "{percent}",
+                  String(valve.percent),
+                ),
+              ];
+              if (valve.passes) {
+                bits.push(
+                  this.t(
+                    "cards.running.pass",
+                    "{pass}",
+                    String(valve.pass),
+                    "{passes}",
+                    String(valve.passes),
+                  ),
+                );
+              }
+              if (valve.max_litres) {
+                bits.push(
+                  this.t(
+                    "cards.running.at-most",
+                    "{volume}",
+                    `${this._n(
+                      displayVolume(valve.max_litres, this.config),
+                      1,
+                    )} ${unit_text(this.config, ZONE_WATER_VOLUME)}`,
+                  ),
+                );
+              }
+              return html`<div class="hero-sub">
+                ${zoneLink(valve.zone_id, valve.zone)}: ${bits.join(", ")}
+              </div>`;
+            })}
+            ${soaking.map(
+              (zone) =>
+                html`<div class="hero-sub">
+                  ${zoneLink(zone.zone_id, zone.zone)}:
                   ${this.t(
-                    "cards.running.left",
-                    "{time}",
-                    remainingDuration(valve.remaining_seconds),
-                    "{percent}",
-                    String(valve.percent),
+                    "cards.running.soaking",
+                    "{when}",
+                    momentLabel(zone.until, this._lang, {
+                      tomorrow: localize("card.tomorrow", this._lang),
+                      yesterday: localize("card.yesterday", this._lang),
+                    }),
+                    "{pass}",
+                    String(zone.next_pass),
+                    "{passes}",
+                    String(zone.passes),
                   )}
-                </div>
-              `,
+                </div>`,
+            )}
+            ${starting.map(
+              (zone) =>
+                html`<div class="hero-sub">
+                  ${zoneLink(zone.zone_id, zone.zone)}:
+                  ${this.t(
+                    "cards.running.starting",
+                    "{supply}",
+                    zone.supply || "",
+                  )}
+                </div>`,
             )}
             ${programs.map((program) => {
               // Joined as text: the template's line breaks put a space
               // before the comma ("Schritt 1/2 , noch 1 h 01 min").
-              const name =
-                program.program_id === "main" &&
-                (!program.name || program.name === "Main program")
-                  ? localize("programs.main_name", this._lang)
-                  : program.name || this.t("cards.running.program");
+              const name = program.name || this.t("cards.running.program");
               const bits: string[] = [];
               if (program.steps) {
                 bits.push(
@@ -449,6 +508,15 @@ class SmartIrrigationViewInfo extends SubscribeMixin(LitElement) {
                 ${bits.length ? `${name}: ${bits.join(", ")}` : name}
               </div>`;
             })}
+            ${waiting.length
+              ? html`<div class="hero-sub">
+                  ${this.t(
+                    "cards.running.then",
+                    "{names}",
+                    waiting.map(programName).join(", "),
+                  )}
+                </div>`
+              : ""}
           </div>
         </div>
         <div class="card-actions">
@@ -459,6 +527,14 @@ class SmartIrrigationViewInfo extends SubscribeMixin(LitElement) {
             : html`<ha-button @click=${() => control("pause_watering")}>
                 ${localize("programs.pause", this._lang)}
               </ha-button>`}
+          ${!paused && (programs.length || valves.length)
+            ? html`<ha-button
+                appearance="plain"
+                @click=${() => control("next_step")}
+              >
+                ${localize("programs.next_step", this._lang)}
+              </ha-button>`
+            : ""}
           <ha-button variant="danger" @click=${stop}>
             ${localize("programs.stop", this._lang)}
           </ha-button>
@@ -723,25 +799,42 @@ class SmartIrrigationViewInfo extends SubscribeMixin(LitElement) {
         </ha-card>
       `;
     }
-    const zones = info?.next_irrigation_zones ?? [];
+    // With "Calculate and water" the programs water, each its own zones: the
+    // run above is the first one planned, not every zone of the installation.
+    const full = this.config?.full_controller === true;
+    const firstRun = full ? this.nextRuns[0] : undefined;
+    const zones: string[] = full
+      ? [
+          ...new Set<string>(
+            (firstRun?.steps || []).flatMap((step: any) =>
+              (step.zones || []).map((z: any) => z.zone ?? `#${z.zone_id}`),
+            ),
+          ),
+        ]
+      : (info?.next_irrigation_zones ?? []);
     // Owed a run under full control with no valve to open: left out of the run
     // above, and named, with a way to the zone (#969).
     const withoutValve = ((info as any)?.zones_without_valve ?? []) as {
       id: number;
       name: string;
     }[];
-    const seconds = info?.next_irrigation_duration ?? 0;
+    const seconds = full
+      ? Number(firstRun?.expected_seconds ?? 0)
+      : (info?.next_irrigation_duration ?? 0);
     const postponed = (info as any)?.skip_preview?.checks?.find(
       (check: any) => check.id === "postponed" && check.skip,
     );
     const skipped = info?.skip_preview?.should_skip
       ? info?.skip_preview?.reason
       : null;
-    // The main program's own schedules start it in place of the trigger: the
+    // The programs' schedules start the watering in place of the trigger: the
     // trigger is not armed and its start time is not the one that counts.
-    const bySchedules = (info as any)?.start_source === "main_schedules";
+    const bySchedules =
+      full ||
+      (!!(info as any)?.start_source &&
+        (info as any).start_source !== "trigger");
     const startAt = bySchedules
-      ? this.mainScheduleStart
+      ? (firstRun?.start ?? this.programsStart)
       : info?.next_irrigation_start;
     const start = startAt
       ? localizedDateTime(startAt, this.hass, {
@@ -837,36 +930,18 @@ class SmartIrrigationViewInfo extends SubscribeMixin(LitElement) {
           </div>
         </div>
         <div class="card-content hero-detail">
-          ${this.nextProgram
-            ? html`<span
-                >${this.t(
-                  "cards.next-run.next-program",
-                  "{program}",
-                  this.nextProgram.name,
-                  "{start}",
-                  localizedDateTime(this.nextProgram.start, this.hass, {
-                    weekday: "long",
-                    day: "numeric",
-                    month: "short",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  }),
-                )}</span
-              >`
-            : ""}
+          ${this.renderNextRuns()}
           ${bySchedules
             ? html`<span
                 >${this._setIn(
                   "programs",
-                  this.t("cards.next-run.main-schedules"),
+                  this.t("cards.next-run.program-schedules"),
                 )}</span
               >`
             : html`<span>
                 ${this.t("cards.next-run.labels.trigger")}:
                 ${this._setIn(
-                  // With the full controller the trigger is the main
-                  // program's, and is set with it.
-                  this.config?.full_controller ? "programs" : "general",
+                  "general",
                   info?.trigger_name ??
                     this.t("cards.next-run.trigger-default"),
                 )}
@@ -900,7 +975,7 @@ class SmartIrrigationViewInfo extends SubscribeMixin(LitElement) {
                 )}</span
               >`
             : ""}
-          ${info?.zone_sequencing
+          ${info?.zone_sequencing && !full
             ? html`<span
                 >${this.t(
                   `cards.next-run.sequencing-${info.zone_sequencing}`,
@@ -915,28 +990,111 @@ class SmartIrrigationViewInfo extends SubscribeMixin(LitElement) {
     `;
   }
 
+  /** The next runs, in the order they will water (Q11). */
+  private renderNextRuns(): TemplateResult {
+    if (!this.nextRuns.length) return html``;
+    const clock = (iso: string) =>
+      new Intl.DateTimeFormat(this._lang, {
+        hour: "2-digit",
+        minute: "2-digit",
+      }).format(new Date(iso));
+    const when = (iso: string) =>
+      localizedDateTime(iso, this.hass, {
+        weekday: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    const label = (id?: string, name?: string) => name || id || "";
+    return html`
+      <span class="next-runs-head">${this.t("cards.next-run.next-runs")}</span>
+      ${this.nextRuns.map((run: any) => {
+        const notes: string[] = [];
+        if (run.waits_for)
+          notes.push(
+            this.t(
+              "cards.next-run.run-waits",
+              "{program}",
+              label(run.waits_for.program_id, run.waits_for.program),
+              "{start}",
+              clock(run.expected_start),
+              "{end}",
+              clock(run.expected_end),
+            ),
+          );
+        if (run.skipped_reason === "suspended")
+          notes.push(
+            this.t(
+              "cards.next-run.run-suspended",
+              "{when}",
+              when(run.suspended_until),
+            ),
+          );
+        else if (run.skipped_reason)
+          notes.push(this.t("cards.next-run.run-skipped"));
+        const twice = (run.watered_twice || []).map((z: any) => z.zone);
+        return html`<span class="next-run"
+          >${when(run.start)}
+          ${label(run.program_id, run.program)}${notes.map(
+            (note) => html` · ${note}`,
+          )}${twice.length
+            ? html` ·
+                <span class="warning"
+                  >${this.t(
+                    "cards.next-run.run-twice",
+                    "{zones}",
+                    twice.join(", "),
+                  )}</span
+                >`
+            : ""}</span
+        >`;
+      })}
+    `;
+  }
+
   /** The skip conditions, each with the numbers behind it. */
   private renderDecision(): TemplateResult {
     const preview = this.info?.skip_preview;
 
     return html`
-      <ha-card header="${this.t("cards.decision.title")}">
+      <ha-card
+        header="${
+          // The answer is for the next run: with several runs named above,
+          // "Will it be skipped?" did not say which (Q22).
+          this.nextRuns.length > 1
+            ? this.t("cards.decision.title-next")
+            : this.t("cards.decision.title")
+        }"
+      >
         <div class="card-content">
           ${!preview
             ? html`<div class="info-note">
                 ${this.t("cards.decision.unavailable")}
               </div>`
-            : html`
-                <div class="verdict ${preview.should_skip ? "skip" : "run"}">
-                  ${preview.should_skip
-                    ? this.t("cards.decision.will-skip")
-                    : this.t("cards.decision.will-run")}
-                </div>
-                ${preview.checks.map((check) => this.renderCheck(check))}
-                <div class="info-note">
-                  ${this.t("cards.decision.preview-note")}
-                </div>
-              `}
+            : preview.should_skip
+              ? html`
+                  <div class="verdict skip">
+                    ${this.t("cards.decision.will-skip")}
+                  </div>
+                  ${preview.checks.map((check) => this.renderCheck(check))}
+                  <div class="info-note">
+                    ${this.t("cards.decision.preview-note")}
+                  </div>
+                `
+              : // Nothing holds it back: one line, the conditions behind it
+                // for whoever wants to see why.
+                html`
+                  <details class="more">
+                    <summary class="verdict run">
+                      ${this.t("cards.decision.will-run")}
+                    </summary>
+                    <div class="more-body">
+                      ${preview.checks.map((check) => this.renderCheck(check))}
+                      <div class="info-note">
+                        ${this.t("cards.decision.preview-note")}
+                      </div>
+                    </div>
+                  </details>
+                `}
           ${this.renderLastDecision()}
         </div>
       </ha-card>
@@ -1269,6 +1427,14 @@ class SmartIrrigationViewInfo extends SubscribeMixin(LitElement) {
       }
       .hero-detail > span::first-letter {
         text-transform: uppercase;
+      }
+      .hero-detail > span.next-runs-head {
+        color: var(--primary-text-color);
+        font-weight: 500;
+        margin-top: 4px;
+      }
+      .hero-detail .warning {
+        color: var(--warning-color, #ff9800);
       }
 
       /* A line of days: what the sky is about to do. */

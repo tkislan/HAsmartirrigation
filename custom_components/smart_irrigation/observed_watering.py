@@ -32,6 +32,7 @@ Smart Irrigation fork (https://github.com/JustChr/HAsmartirrigation), MIT.
 import logging
 import math
 from datetime import datetime, timedelta
+from typing import Any
 
 import homeassistant.util.dt as dt_util
 from homeassistant.core import Event, callback
@@ -71,6 +72,10 @@ _VOLUME_TO_LITRES = {
 
 class ObservedWateringMixin:
     """Credit a zone's bucket for observed runs of its linked valve."""
+
+    # Given by the coordinator that inherits this mixin.
+    hass: Any
+    store: Any
 
     async def async_setup_observed_watering(self) -> None:
         """(Re)subscribe to linked-valve state changes per the current config.
@@ -165,6 +170,10 @@ class ObservedWateringMixin:
                 # We weren't tracking this run (the valve was already on when we
                 # subscribed, or it briefly went unavailable mid-run).
                 return
+            if self._too_short_to_credit(
+                zone_id, (dt_util.utcnow() - started).total_seconds()
+            ):
+                return
 
             # Prefer the measured-volume path when a flow meter is configured and
             # produced a usable, non-decreasing reading across the run.
@@ -215,6 +224,30 @@ class ObservedWateringMixin:
             self.hass.async_create_task(
                 self._credit_observed_watering(zone_id, seconds, started)
             )
+
+    def _too_short_to_credit(self, zone_id: int, seconds: float) -> bool:
+        """Whether a run is at or under the zone's "ignore runs up to".
+
+        A short run to cool the leaves on a hot afternoon mostly stays on
+        them and evaporates: it is not watering, so it is neither credited
+        nor taken as the zone's watering of the cycle. A longer run counts in
+        full, the first seconds included.
+        """
+        zone = self.store.get_zone(zone_id) or {}
+        try:
+            limit = float(zone.get(const.ZONE_OBSERVED_IGNORE_SECONDS) or 0.0)
+        except (TypeError, ValueError):
+            return False
+        if limit <= 0 or seconds > limit:
+            return False
+        _LOGGER.info(
+            "Observed watering: zone %s ran %.0f s, at or under the %.0f s it "
+            "ignores; not credited",
+            zone_id,
+            seconds,
+            limit,
+        )
+        return True
 
     def _note_watered(self, zone_id: int) -> None:
         """Remember that the zone was just watered, as the runner does for its own.
@@ -528,6 +561,13 @@ class ObservedWateringMixin:
         duration = float(seconds) if seconds is not None else 0.0
         if started is None:
             started = end - timedelta(seconds=duration)
+        # Which program watered it: twelve rows of one evening said nothing of
+        # it (UX walk of 13 Nov., Q16). A run of ours carries it.
+        controls = getattr(self, "_run_controls", None)
+        zone_id = zone.get(const.ZONE_ID)
+        control = (
+            controls().get(int(zone_id)) if controls and zone_id is not None else None
+        )
         try:
             await self.store.async_add_irrigation_history(
                 {
@@ -536,6 +576,7 @@ class ObservedWateringMixin:
                     const.HISTORY_ZONE_NAME: zone.get(const.ZONE_NAME),
                     const.HISTORY_DURATION: round(duration, 1),
                     const.HISTORY_WATER_USED: round(volume_l, 3),
+                    const.HISTORY_PROGRAM_ID: getattr(control, "source", None),
                 }
             )
         except Exception as e:  # noqa: BLE001

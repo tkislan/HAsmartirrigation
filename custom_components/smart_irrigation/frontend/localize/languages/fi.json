@@ -114,7 +114,10 @@
           "name": "Nimi",
           "size": "Pinta-ala",
           "throughput": "Virtaama",
-          "throughput-help": "Kuinka paljon vettä tämä alue antaa minuutissa. Mittaa se jos voit, sen sijaan että otat sen tuotetiedoista: siitä johdetaan jokainen kesto, ja se on hiljaisin tapa kastella kaksi kertaa niin kauan kuin tarkoitit."
+          "throughput-help": "Kuinka paljon vettä tämä alue antaa minuutissa. Mittaa se jos voit, sen sijaan että otat sen tuotetiedoista: siitä johdetaan jokainen kesto, ja se on hiljaisin tapa kastella kaksi kertaa niin kauan kuin tarkoitit.",
+          "valve": "Venttiili",
+          "valve-help": "Venttiili tai kytkin, joka kastelee tämän vyöhykkeen. Ilman sitä vyöhyke lasketaan mutta ei kastella, kunnes liität sellaisen Vyöhykkeissä.",
+          "valve-help-calculate": "Jos Smart Irrigationin pitää nähdä, milloin vyöhyke kastellaan käsin tai automaatiollasi, jotta se laskee sen veden."
         },
         "environment": {
           "question": "Missä se kasvaa?",
@@ -152,12 +155,21 @@
         "review": {
           "question": "Valmis luomaan",
           "zone": "Alue",
+          "program": "Kastelee",
+          "new-program": "Uusi ohjelma",
           "environment": "Ympäristö",
           "engine": "Moduuli",
           "sources": "Lähteet",
           "from-the-service": "sääpalvelusta",
           "no-sensor": "ei anturia",
-          "help": "Tämä luo laskentamoduulin, anturiryhmän ja alueen, täsmälleen kuten muut välilehdet tekisivät. Jälkeenpäin mikään ei ole lukittu."
+          "help": "Tämä luo anturiryhmän ja vyöhykkeen, kuten muut välilehdet tekisivät. Mitään ei lukita jälkeenpäin.",
+          "mode": "Smart Irrigation",
+          "no-valve": "ei mitään"
+        },
+        "mode": {
+          "question": "Mitä Smart Irrigationin pitää tehdä?",
+          "water-help": "Se laskee, mitä kukin vyöhyke tarvitsee, ja avaa venttiilit itse, ohjelmalla, joka kastelee vyöhykkeesi auringonnousuun mennessä. Voit muuttaa sen aikataulua myöhemmin.",
+          "calculate-help": "Se laskee, mitä kukin vyöhyke tarvitsee; automaatiosi, Irrigation Unlimited tai ohjaimesi avaa venttiilit."
         }
       },
       "step": "vaihe",
@@ -170,7 +182,11 @@
       "calc-nothing": "Laskettu: siltä ei vielä puutu vettä.",
       "calc-failed": "Laskenta ei onnistunut. Alue kertoo syyn kohdassa Alueet.",
       "open-zone": "Avaa alue",
-      "another": "Määritä toinen alue"
+      "another": "Määritä toinen alue",
+      "done-next-added": "Se on nyt ohjelman {program} viimeinen vaihe, ja ohjelma kastelee sen aikataulujensa mukaan. Löydät sen Kastelu-välilehdeltä.",
+      "done-next-new-program": "Uusi ohjelma, {program}, kastelee sen joka päivä auringonnousuun mennessä. Löydät sen Kastelu-välilehdeltä.",
+      "new-program-name": "Kastelu",
+      "done-next-no-valve": "Liitä siihen venttiili Vyöhykkeissä, jotta se kastellaan."
     },
     "weatherservice": {
       "history": {
@@ -182,7 +198,7 @@
         "no-data": "Sääpalvelusta ei ole vielä haettu tietoja."
       },
       "title": "Sääpalvelu",
-      "description": "Tarkastele ja vaihda säätietojen hakuun käytettävää sääpalvelua — integraatiota ei tarvitse asentaa uudelleen. API-avain vahvistetaan ja muutos otetaan käyttöön välittömästi.",
+      "description": "Tarkastele ja vaihda säätietojen hakuun käytettävää sääpalvelua: integraatiota ei tarvitse asentaa uudelleen. API-avain vahvistetaan ja muutos otetaan käyttöön välittömästi.",
       "labels": {
         "use-weather-service": "Käytä sääpalvelua",
         "service": "Sääpalvelu",
@@ -196,7 +212,7 @@
         "open-sensor-groups": "Avaa anturiryhmät"
       },
       "messages": {
-        "no-service": "Sääpalvelua ei käytetä — säätiedot tulevat vain omilta antureiltasi.",
+        "no-service": "Sääpalvelua ei käytetä: säätiedot tulevat vain omilta antureiltasi.",
         "saved": "Sääpalvelu päivitetty ja otettu käyttöön.",
         "reload-note": "Tallennus vahvistaa API-avaimen palvelua vasten ja ottaa muutoksen käyttöön välittömästi.",
         "owm-onecall-hint": "OpenWeatherMap vaatii One Call API 3.0 -tilauksen (One Call by Call). Se on maksuton 1000 kutsuun päivässä, mutta se täytyy aktivoida kortilla, ja uusi avain voi vaatia parikin tuntia ennen kuin se toimii. Tavallinen oletusavain hylätään.",
@@ -227,7 +243,7 @@
       },
       "messages": {
         "exported": "Varmuuskopiotiedosto ladattu.",
-        "restored": "Määritys palautettu — ladataan integraatio uudelleen.",
+        "restored": "Määritys palautettu: ladataan integraatio uudelleen.",
         "invalid-file": "Tämä tiedosto ei ole kelvollinen Smart Irrigation -varmuuskopio.",
         "confirm-title": "Korvataanko koko määritys?",
         "summary": "Tämä varmuuskopio sisältää",
@@ -239,13 +255,15 @@
       "cards": {
         "automatic-duration-calculation": {
           "header": "Kastelun keston laskenta",
-          "description": "Kunkin vyöhykkeen kastelun kesto perustuu sen vesitaseeseen: mitä sää otti maasta, miinus sade. Tässä valitset, milloin se lasketaan. Se, mikä kastelun käynnistää, päätetään muualla, aloitusliipaisimella.",
+          "description": "Kunkin vyöhykkeen kasteluaika tulee sen vesitaseesta: mitä sää otti maasta, miinus sade. Tässä valitset, milloin se lasketaan.",
           "labels": {
             "calc-when": "Kastelun kesto lasketaan",
             "calc-when-time": "Kiinteänä kellonaikana",
             "calc-when-start": "Juuri ennen jokaista aloitusta",
             "calc-when-manual": "Vain pyydettäessä",
-            "calc-when-hint": "Juuri ennen jokaista aloitusta: aloitusliipaisimen hetkellä, tuoreimmilla säätiedoilla. Oikea valinta, kun Smart Irrigation käynnistää kastelun (suora venttiiliohjaus tai aloitustapahtuma). Kiinteänä kellonaikana: joka päivä alla olevaan aikaan, kun kastelun käynnistää jokin muu kuin Smart Irrigation ja se lukee kestot milloin haluaa (Irrigation Unlimited, oma aikataulu). Vain pyydettäessä: mitään ei lasketa itsestään, käytä laskentapainikkeita tai palveluja.",
+            "calc-when-hint": "Juuri ennen jokaista aloitusta: kun ohjelma tai aloitustapahtuma alkaa, tuoreimmalla säällä; oikea valinta, kun Smart Irrigation aloittaa kastelun. Kiinteään aikaan: joka päivä alla olevaan aikaan, kun jokin muu aloittaa kastelun ja lukee kestot milloin haluaa. Vain pyynnöstä: mitään ei lasketa itsestään, käytä laskentapainikkeita tai toimintoja. Juuri ennen jokaista käynnistystä pitää myös päivittäisen laskennan alla olevaan aikaan, joten vesitase etenee kahden käynnistyksen välillä.",
+            "calc-when-start-event": "Juuri ennen aloitustapahtumaa",
+            "calc-when-hint-calc-only": "Juuri ennen aloitustapahtumaa: kun aloituksen laukaisin laukeaa, tuoreimmalla säällä, jotta se, mikä kastelee tämän tapahtuman perusteella, saa ajantasaiset kestot. Kiinteään aikaan: joka päivä alla olevaan aikaan, kun oma automaatiosi tai ohjaimesi lukee kestot milloin haluaa. Vain pyynnöstä: mitään ei lasketa itsestään, käytä laskentapainikkeita tai toimintoja. Juuri ennen käynnistystapahtumaa pitää myös päivittäisen laskennan alla olevaan aikaan, joten vesitase etenee kahden tapahtuman välillä.",
             "calc-time": "Laske kello",
             "calc-time-hint": "Päivittäinen laskenta: menetetty vesi lisätään kunkin vyöhykkeen vesitaseeseen ja kastelun kestot asetetaan.",
             "hourly-calculation": "Laske haihdunta tunti tunnilta",
@@ -280,7 +298,6 @@
           }
         },
         "panel-mode": {
-          "header": "Paneeli",
           "labels": {
             "advanced": "Lisäasetukset",
             "advanced-hint": "Näyttää asetukset, jotka hienosäätävät mallia: kuivatus, rajat, kerroin, kuinka pitkälle alue katsoo eteenpäin. Niillä on järkevät oletusarvot; jätä tämä pois päältä, ellet tiedä tarvitsevasi niitä. Arvosi säilyvät kummassakin tapauksessa."
@@ -296,13 +313,17 @@
         },
         "master-switch": {
           "title": "Smart Irrigation",
-          "label": "Laske ja kastele",
-          "description": "Pois päältä Smart Irrigation hakee edelleen säätiedot ja pitää anturinsa, mutta ei laske mitään, jättää jokaisen vyöhykkeen vesitaseen ennalleen, ei avaa yhtään venttiiliä eikä aja yhtään ohjelmaa. Kun se kytketään taas päälle, pois päältä oltua aikaa ei lasketa.",
+          "mode": "Mitä Smart Irrigation tekee",
+          "mode-water": "Laske ja kastele",
+          "mode-calculate": "Vain laskenta",
+          "mode-off": "Pysäytä kaikki",
           "off-note": "Pois päältä: mitään ei lasketa eikä mitään kastella. Säätietojen haku jatkuu, eikä pois päältä oltua aikaa lasketa, kun kytket sen taas päälle.",
-          "confirm-off": "Kytketäänkö Smart Irrigation pois päältä? Käynnissä oleva kastelu pysähtyy heti, eikä mitään lasketa tai kastella ennen kuin se kytketään taas päälle."
+          "calculate-note": "Vain laskenta: Smart Irrigation laskee vesitaseet ja kestot ja lähettää aloitustapahtumansa, mutta ei avaa venttiileitä. Oma automaatiosi, Irrigation Unlimited tai ohjaimesi kastelee näillä kestoilla.",
+          "confirm-off": "Kytketäänkö Smart Irrigation pois päältä? Käynnissä oleva kastelu pysähtyy heti, eikä mitään lasketa tai kastella ennen kuin se kytketään taas päälle.",
+          "confirm-calculate": "Vain laskenta? Smart Irrigation lopettaa venttiilien avaamisen: käynnissä oleva kastelu pysähtyy nyt, ja jatkossa oma automaatiosi kastelee sen kestoilla.",
+          "water-note": "Laske ja kastele: Smart Irrigation laskee, mitä kukin vyöhyke tarvitsee, ja avaa venttiilit itse ohjelmillaan. Jokainen ohjelma kastelee vaiheidensa vyöhykkeet aikataulujensa mukaan."
         }
       },
-      "description": "Tämä sivu tarjoaa yleiset asetukset.",
       "title": "Yleiset",
       "sections": {
         "calculation": "Laskenta",
@@ -311,8 +332,7 @@
         "calculation-sub": "Kuinka paljon kukin alue tarvitsee ja milloin se lasketaan.",
         "control-sub": "Mikä avaa venttiilit ja mikä käynnistää kastelun.",
         "system-sub": "Paneeli, blueprintit, asennusavustaja ja siirtyminen Irrigation Unlimitedistä."
-      },
-      "moved-to-weather": "Sääpalvelu, sijainti, kuinka usein sää luetaan, sekä ohitustarkistukset ovat tällä välilehdellä:"
+      }
     },
     "help": {
       "title": "Ohje",
@@ -354,7 +374,7 @@
           "calc-daily": "päivittäin klo {time}",
           "calc-before-start": "juuri ennen jokaista käynnistystä",
           "calc-manual": "vain pyydettäessä",
-          "main-schedules": "Käynnistää pääohjelman aikataulut (aloitusliipaisinta ei käytetä tällä hetkellä)",
+          "program-schedules": "Käynnistävät ohjelmien aikataulut",
           "accounts-for-duration": "laskettu taaksepäin niin että kastelu päättyy silloin",
           "starts-at-trigger": "alkaa sillä hetkellä",
           "sequencing-sequential": "yksi alue kerrallaan, joten kokonaisaika on kaikkien alueiden summa",
@@ -364,7 +384,6 @@
           "sub-nothing": "Yhdeltäkään alueelta ei vielä puutu tarpeeksi vettä. Seuraava aloitus olisi {start}.",
           "headline-not-calculated": "Ei vielä laskettu",
           "sub-not-calculated": "Vyöhykkeillä ei ole kestoa ennen ensimmäistä laskentaa, joka tehdään {when}. Laske ne heti valitsemalla Laske kaikki vyöhykkeet kohdassa Alueet.",
-          "next-program": "Seuraava ohjelma: {program}, {start}",
           "headline-watering": "Kastelu {start}",
           "headline-watering-soon": "Kastelu seuraavalla aloituksella",
           "sub-watering": "{count} aluetta, {duration} kaikkiaan.",
@@ -382,7 +401,12 @@
           "headline-off": "Smart Irrigation on pois päältä",
           "sub-off": "Se hakee edelleen säätiedot, mutta ei laske eikä kastele mitään ennen kuin se kytketään taas päälle.",
           "open-settings": "Avaa asetukset",
-          "sub-watering-one": "Yksi alue, {duration}."
+          "sub-watering-one": "Yksi alue, {duration}.",
+          "next-runs": "Seuraavaksi",
+          "run-waits": "odottaa ohjelmaa {program}, noin {start}-{end}",
+          "run-skipped": "odotetaan ohitettavan: sadetta ennustettu",
+          "run-twice": "{zones} kastellaan kahdesti peräkkäin",
+          "run-suspended": "keskeytetty {when} asti"
         },
         "decision": {
           "title": "Ohitetaanko se?",
@@ -417,7 +441,8 @@
           "detail-raining": "Sataa",
           "detail-dry": "Ei sada",
           "detail-held": "jää tämän kastelun väliin",
-          "check-postponed": "Sinun lykkäämä"
+          "check-postponed": "Sinun lykkäämä",
+          "title-next": "Ohitetaanko seuraava kastelu?"
         },
         "estimate": {
           "title": "Missä kukin alue on nyt",
@@ -455,7 +480,14 @@
           "left": "{time} jäljellä ({percent} %)",
           "program": "Ohjelma",
           "step": "vaihe {step}/{steps}",
-          "program-left": "{time} jäljellä"
+          "program-left": "{time} jäljellä",
+          "headline-soaking": "Imeytys kahden erän välissä",
+          "headline-starting": "Kastelu käynnistyy",
+          "pass": "erä {pass}/{passes}",
+          "at-most": "enintään {volume}",
+          "soaking": "imeytys, seuraava erä klo {when} ({pass}/{passes})",
+          "starting": "odotetaan, että {supply} käynnistyy",
+          "then": "Sitten: {names}, odottavat vuoroaan"
         }
       },
       "gaps": {
@@ -469,7 +501,7 @@
         },
         "no_valve_path": {
           "title": "Mikään täällä ei avaa venttiiliä",
-          "body": "Smart Irrigation laskee, kuinka kauan kastellaan; jonkin täytyy toimia sen mukaan. Kytke joko suora venttiiliohjaus päälle kohdassa Asetukset ja liitä sitten venttiili jokaiseen alueeseen, tai kirjoita automaatio aloitustapahtumaan (blueprintit tekevät tämän puolestasi). Jos automaatio tekee sen jo, mitään ei tarvitse muuttaa.",
+          "body": "Smart Irrigation laskee, kuinka kauan kastellaan; jonkin on toimittava sen mukaan. Valitse joko Asetuksista ”Laske ja kastele” ja liitä jokaiseen alueeseen venttiili, tai kirjoita automaatio käynnistystapahtumalle (blueprintit tekevät sen puolestasi). Jos automaatio tekee sen jo, mitään ei tarvitse muuttaa.",
           "action": "Venttiiliohjaukseen"
         }
       }
@@ -552,9 +584,6 @@
           },
           "greenhouse": "Kasvihuone",
           "greenhouse_description": "Suljettu ympäristö: kasvihuone, muovitunneli, mikä tahansa lasin tai muovin alla. Näille alueille ei tule sadetta, joten sade jätetään niiden vesitasapainon ulkopuolelle ja sen kentät piilotetaan. Kaksi asiaa sinun on asetettava itse, koska niitä ei voi arvata: anna Tuulen nopeudelle kiinteä arvo lähellä nollaa, koska laskenta olettaa vapaan ilman, ja käytä Auringon säteilylle valoanturia, koska lasitus suodattaa taivaan.",
-          "module": "Moduuli",
-          "module_description": "Tämä ryhmä tarjoaa vain ne lähteet, joita tämä moduuli lukee. Sitä käyttävät alueet perivät valinnan.",
-          "module_undecided": "Moduulia ei ole vielä valittu, joten kaikki lähteet tarjotaan ja jokainen tätä ryhmää käyttävä alue pitää omansa. Valitse yksi nähdäksesi vain ne lähteet, joita se lukee.",
           "wind_height": "Tuulimittarin korkeus (tyhjä: 2 m)",
           "rain_not_from_entity": "Sääentiteetti ei anna satanutta sadetta, vain ennusteen: valitse tähän sadeanturi, muuten vyöhykkeet kastellaan jokaisen sadekuuron jälkeen.",
           "rain_hint_entity": "Juuri nyt satava sade, intensiteettinä. Sääentiteetti vain ennustaa sen: valitse anturi, joka mittaa sadetta."
@@ -683,8 +712,8 @@
         "data-number-of-data-points": "Datapisteiden määrä",
         "drainage_rate": "Valumisnopeus",
         "linked-entity": "Liitetty venttiili/kytkin",
-        "linked-entity-hint": "Venttiili tai kytkin, joka kastelee tämän vyöhykkeen. Aina kun se on käynnissä (manuaalinen hana, automaatio tai Smart Irrigation itse, kun suora venttiilin ohjaus on käytössä), vesitaseeseen hyvitetään käyntiaika ja vyöhykkeen läpäisy. Vaaditaan suljetun silmukan ominaisuuksiin.",
-        "valve-off": "Venttiilin voi liittää, kun suora venttiiliohjaus tai havaittu kastelu on käytössä.",
+        "linked-entity-hint": "Venttiili tai kytkin, joka kastelee tämän alueen. Kun valittuna on ”Laske ja kastele”, Smart Irrigation avaa ja sulkee sen. Havaitulla kastelulla jokainen sen ajo (käsin, automaatiolla tai Smart Irrigationin toimesta) hyvitetään vesitaseeseen käyntiajan ja virtaaman mukaan.",
+        "valve-off": "Venttiilin voi liittää, kun Smart Irrigation kastelee (Laske ja kastele) tai havaittu kastelu on päällä.",
         "valve-off-link": "Ota käyttöön",
         "supply": "Pumppu tai pääventtiili",
         "supply-none": "Ei mitään",
@@ -694,9 +723,11 @@
         "extra-valves-hint": "avataan ja suljetaan sen mukana",
         "flow-sensor": "Kumulatiivinen tilavuusmittari",
         "flow-sensor-hint": "Tarkkaa hyvitystä varten läpäisyn ja ajan sijaan: kumulatiivinen vesimittarin kokonaislukema (tilaluokka total_increasing), ei hetkellinen virtausnopeus. Yksikkö luetaan automaattisesti (L, mL, m³, gal, ft³).",
+        "observed-ignore-seconds": "Ohita kastelut enintään",
+        "observed-ignore-seconds-help": "Näin lyhyttä tai lyhyempää venttiilin ajoa ei hyvitetä: muutama minuutti lehtien viilentämiseksi kuumana iltapäivänä haihtuu enimmäkseen. Pidempi ajo lasketaan kokonaan. Tyhjä: jokainen ajo hyvitetään.",
         "confirm-timeout": "Odota venttiilin vahvistusta",
         "open-resends": "Lähetä avaus uudelleen",
-        "confirm-timeout-help": "Kuinka kauan venttiilillä on aikaa ilmoittaa avautuneensa tai sulkeutuneensa, ja kuinka monta kertaa avaus lähetetään uudelleen sinä aikana. Tyhjä pitää oletukset: 8 sekuntia ilman uudelleenlähetystä, tai 30 sekuntia ja kaksi uudelleenlähetystä täydellä ohjaimella, ja 5 sekuntia sulkemiselle. Pilviventtiili kuten Gardena vahvistaa hitaasti ja laskee jokaisen komennon kiintiöön: anna sille pidempi odotus ja 0 uudelleenlähetystä. Sulkemista yritetään aina toisen kerran.",
+        "confirm-timeout-help": "Kuinka kauan venttiilillä on aikaa ilmoittaa avautuneensa tai sulkeutuneensa, ja kuinka monta kertaa avaus lähetetään uudelleen sinä aikana. Tyhjä: 30 s ja kaksi uudelleenlähetystä; sulkeminen 5 s, yritetään aina kahdesti. Pilviventtiilit kuten Gardena: odota pidempään, 0 uudelleenlähetystä, jokainen komento lasketaan kiintiöön.",
         "safety-off-topic": "Turvasammutuksen MQTT-topic",
         "safety-off-state-key": "Turvasammutuksen tila-avain",
         "safety-off-mode": "Turvasammutuksen tila",
@@ -704,6 +735,10 @@
         "safety-off-mode-zha": "ZHA:n ajastettu sammutus",
         "safety-off-mode-off": "Pois (ei kuolleen miehen kytkintä)",
         "safety-off-mode-help": "Venttiili sulkeutuu itsestään, jos Home Assistant pysähtyy kesken ajon. Automaattinen käyttää yllä olevaa MQTT-aihetta, jos sellainen on, ja ZHA:ssa oleva Sonoff SWV viritetään itsestään. ZHA:n ajastettu sammutus virittää myös minkä tahansa muun ZHA-venttiilin ajastetun sammutuksen vakiokomennolla, jota ei ole varmistettu muilla malleilla. Pois ei koskaan viritä laitteistopohjaista kuolleen miehen kytkintä tälle vyöhykkeelle.",
+        "safety-off-required": "Jos venttiilin omaa ajastinta ei voi asettaa",
+        "safety-off-required-open": "Kastele silti",
+        "safety-off-required-skip": "Jätä venttiili kiinni",
+        "safety-off-required-help": "Jokainen kastelu asettaa venttiilin oman ajastimen, jotta venttiili sulkeutuu itsestään, jos Home Assistant pysähtyy kesken kastelun. Jos se epäonnistuu (venttiili lepotilassa, MQTT ei käytettävissä), kastellaan oletuksena silti, ilman tätä turvaverkkoa. Valinnalla \"Jätä venttiili kiinni\" kastelu ohitetaan: vyöhyke ilmoittaa ongelmasta, ja puuttuva vesi siirtyy seuraavaan kasteluun.",
         "safety-off-topic-help": "Valinnainen laitteistotason vikaturva. MQTT:n set-topic (esim. zigbee2mqtt/my_valve/set), jota venttiilin laite kuuntelee. Smart Irrigation julkaisee sinne \"päälle ajastetulla sammutuksella\", jotta laite sulkee venttiilin itse, jos Home Assistant pysähtyy kesken ajon eikä koskaan lähetä sulkua. Tila-avain on laitteen päällä/pois-ominaisuus (\"state\", tai \"state_l1\"…\"state_l4\" monikanavaiselle laitteelle). Tuki riippuu laitteen laiteohjelmistosta (on_time): testaa se ennen kuin luotat siihen. Jätä tyhjäksi poistaaksesi käytöstä.",
         "optional": "valinnainen",
         "irrigation-threshold": "Kasteluraja",
@@ -730,7 +765,7 @@
         "available-water-help": "Kuinka paljon vettä tämän alueen maa pidättää kasveille, mm:nä (juuriston syvyys metreinä kertaa se, mitä maa pidättää metriä kohti: noin 50–110 mm hiekalle, 130–180 multamaalle, 120–200 savelle, FAO-56:n mukaan). Jätä tyhjäksi, jos haluat jättää asiat ennalleen. Kun arvo on asetettu, alijäämä ei voi laskea sen alle, ja kun kasvit ovat käyttäneet siitä sallitun osuuden (50 %, ellet muuta sitä), ne ottavat vähemmän vettä, jolloin alijäämä ei enää kasva yhtä nopeasti.",
         "distribution-efficiency": "Jakautumistehokkuus",
         "distribution-efficiency-help": "Suuttimista tulevan veden osuus, joka päätyy kasveille, %:na. Sadettimet tuulessa tai rinteessä menettävät osan, tippukastelu lähes ei mitään. Jätä tyhjäksi arvolle 100 %. Alue arvolla 80 % kastelee 25 % kauemmin samalle vesikerrokselle ja hyvittää vain 80 % siitä, mitä se antaa.",
-        "days-between-irrigation-help": "Jätä tyhjäksi, jos haluat noudattaa yleisasetusta (Asetukset, Kastelujen väliset päivät). Luku korvaa yleisasetuksen vain tälle alueelle: 1 kastelee sen joka päivä jos se tarvitsee vettä, 3 korkeintaan joka kolmas päivä, 0 poistaa rajoituksen. Päivät lasketaan siitä, kun tätä aluetta kasteltiin viimeksi.",
+        "days-between-irrigation-help": "Jätä tyhjäksi, jos haluat noudattaa yleisasetusta (Sää, Kastelun ohitus). Luku korvaa yleisasetuksen vain tälle alueelle: 1 kastelee sen joka päivä jos se tarvitsee vettä, 3 korkeintaan joka kolmas päivä, 0 poistaa rajoituksen. Päivät lasketaan siitä, kun tätä aluetta kasteltiin viimeksi.",
         "soil-moisture-sensor": "Maankosteusanturi",
         "soil-moisture-sensor-hint": "Alue jää kastelun väliin niin kauan kuin maa on rajassa tai sen yli. Vesitase säilytetään.",
         "soil-moisture-threshold": "Ohita arvosta",
@@ -746,6 +781,8 @@
           "fixed": "Kiinteä määrä"
         },
         "forecast-days": "Katso eteenpäin",
+        "coastal": "Rannikkosijainti",
+        "coastal-help": "Käytetään vain, kun auringon säteily arvioidaan lämpötilasta ilman säteilyanturia tai -palvelua: meren tai suuren järven rannalla päivät ovat leudompia, ja FAO-56 käyttää eri kerrointa.",
         "forecast-days-help": "0: alue kastelee sen, minkä sää todella otti. 1: myös huominen otetaan huomioon, 2: huominen ja sitä seuraava päivä, ja niin edelleen. Mitä kuumemmat tulevat päivät ovat, sitä enemmän kastellaan tänään. Tämä ei ole sateen takia ohittaminen, joka on oma asetuksensa.",
         "fixed-amount": "Haihdunta päivässä",
         "engine-shared-help": "Tämä asetus kuuluu vain tälle alueelle: jokaisella alueella on omansa, eikä sen muuttaminen tässä muuta mitään muualla.",
@@ -774,7 +811,10 @@
         },
         "duration-readonly-automatic": "Laskettu puolestasi: tämän alueen kastelu tulee sen vesitasapainosta. Aseta se käsikäytölle, jos haluat kirjoittaa keston itse.",
         "duration-readonly-disabled": "Pois päältä olevaa aluetta ei koskaan kastella, joten sillä ei ole kasteluaikaa.",
-        "et-deficiency-help": "Mitä tämä alue tarvitsee päivässä: ETc, referenssihaihdunta kertaa kasvikerroin, kausisäätö mukaan lukien. Ennen jaksolle skaalausta ja ennen sadetta, mikä tekee siitä vertailukelpoisen määrityksestä toiseen. Alueen anturi kantaa myös referenssiluvun omanaan, attribuuttina `eto`, jota voi verrata siihen mitä sääpalvelu julkaisee."
+        "et-deficiency-help": "Mitä tämä alue tarvitsee päivässä: ETc, referenssihaihdunta kertaa kasvikerroin, kausisäätö mukaan lukien. Ennen jaksolle skaalausta ja ennen sadetta, mikä tekee siitä vertailukelpoisen määrityksestä toiseen. Alueen anturi kantaa myös referenssiluvun omanaan, attribuuttina `eto`, jota voi verrata siihen mitä sääpalvelu julkaisee.",
+        "safety-off-entity": "Venttiilin oma kesto",
+        "safety-off-entity-help": "Venttiilille, joka sulkeutuu itsestään oman kestonsa jälkeen, kuten Gardena (sen numero \"kastelun kesto\", 1 min ellei muutettu): valitse se numero tähän. Ennen jokaista avausta Smart Irrigation kirjoittaa siihen erän pituuden plus 30 s, jotta venttiili pysyy auki koko erän ajan ja sulkeutuu silti itsestään, jos Home Assistant pysähtyy. Ilman sitä tällainen venttiili sulkeutuu esiasetetun aikansa jälkeen.",
+        "yaml_only_item": "{label}: {value}"
       },
       "no_items": "Vyöhykkeitä ei ole vielä määritetty.",
       "title": "Vyöhykkeet",
@@ -801,7 +841,9 @@
         "no-valve": "Ei liitettyä venttiiliä, joten tätä aluetta ei kastella.",
         "no-valve-action": "Liitä venttiili",
         "running": "Kastellaan nyt, {time} jäljellä.",
-        "running-paused": "Kastelu tauolla, {time} jäljellä."
+        "running-paused": "Kastelu tauolla, {time} jäljellä.",
+        "set-aside": "Siirretty sivuun {count} peräkkäisen epäonnistumisen jälkeen: ei kastella ennen käyttöönottoa.",
+        "put-back": "Ota takaisin käyttöön"
       },
       "calendar": {
         "title": "Kastelukalenteri (12 kuukautta, arvio)",
@@ -827,11 +869,18 @@
         "zone": "Vyöhyke ja venttiili",
         "need": "Mitä se tarvitsee",
         "status": "Tilanne"
+      },
+      "yaml": {
+        "only_help": "Asetuksia, joita visuaalinen editori ei näytä. Ne säilyvät, kun muokkaat tässä.",
+        "help": "Vyöhykkeen asetukset tekstinä, paneelin yksiköissä. Pois jätetty valinnainen asetus tyhjennetään, pakollinen (nimi, pinta-ala...) säilyy. Mitään ei tallenneta ennen käyttöönottoa.",
+        "not_a_zone": "Tämä ei ole vyöhyke: vyöhyke on joukko avaimia (name, size, throughput...).",
+        "not_settings": "Eivät ole vyöhykkeen asetuksia, tai niitä ei voi asettaa tässä: {keys}",
+        "applied": "Vyöhyke tallennettu"
       }
     },
     "history": {
       "title": "Historia",
-      "description": "Jokainen kastelu, jonka Smart Irrigation on kirjannut alueelle: milloin se alkoi, kuinka kauan se kasteli ja kuinka paljon vettä se käytti. Kastelut kirjaa suora venttiiliohjaus ja havaittu kastelu, ja ne säilytetään 90 päivää.",
+      "description": "Jokainen kastelu, jonka Smart Irrigation on kirjannut alueelle: milloin se alkoi, kuinka kauan se kasteli ja kuinka paljon vettä se käytti. Kastelut kirjataan, kun Smart Irrigation kastelee, sekä havaitulla kastelulla, ja ne säilytetään 90 päivää.",
       "refresh": "Päivitä",
       "no-data": "Kasteluja ei ole vielä kirjattu.",
       "table": {
@@ -840,7 +889,8 @@
         "zone": "Alue",
         "duration": "Kesto",
         "water": "Veden kulutus",
-        "truncated": "Näytetään {count} uusinta kastelua yhteensä {total} kastelusta."
+        "truncated": "Näytetään {count} uusinta kastelua yhteensä {total} kastelusta.",
+        "by_hand": "käsin"
       },
       "charts": {
         "total-title": "Veden kokonaiskulutus päivässä (viimeiset 30 päivää)",
@@ -925,7 +975,6 @@
         "no-schedules": "Ei aikataulua.",
         "schedules-off": "Sen aikataulut ovat pois päältä, kunnes otat ne käyttöön.",
         "schedules-stay-on": "Otit sen aikataulut käyttöön: ne pysyvät ennallaan.",
-        "disabled": "Pois päältä Irrigation Unlimitedissä, ja täälläkin.",
         "removed": "Eivät ole enää Irrigation Unlimitedissä, poistettu: {programs}."
       },
       "supplies": {
@@ -962,7 +1011,7 @@
         },
         "nothing-waters": "Tuonti ei kastele mitään. Irrigation Unlimited jatkaa kastelua, kunnes poistat sen käytöstä ja otat nämä aikataulut käyttöön.",
         "blocked": "Ratkaise ensin punaisella merkityt kohdat; siihen asti mitään ei voi tuoda.",
-        "full-controller-off": "Täysi ohjain on pois päältä: ohjelmat tuodaan, mutta ne kastelevat vasta, kun se on päällä.",
+        "full-controller-off": "Smart Irrigation ei ole tilassa ”Laske ja kastele”: ohjelmat tuodaan, mutta ne kastelevat vasta, kun se on valittu.",
         "nothing-waters-iu-off": "Tuonti ei kastele mitään, eikä Irrigation Unlimited ole käynnissä: Home Assistant ei ladannut sitä (katso sen loki). Mitään ei kastella ennen kuin otat nämä aikataulut käyttöön."
       },
       "errors": {
@@ -986,16 +1035,16 @@
         "programs": "{count, plural, one {# ohjelma} other {# ohjelmaa}}",
         "next": "Uusien ohjelmien aikataulut ovat pois päältä, joten Irrigation Unlimited kastelee yhä. Kun olet valmis, poista Irrigation Unlimitedin ohjaimet käytöstä ja ota nämä aikataulut käyttöön Ohjelmat-sivulla.",
         "open-programs": "Avaa ohjelmat",
-        "next-off": "Täysi ohjain on pois päältä, joten nämä ohjelmat eivät vielä kastele ja Irrigation Unlimited jatkaa kastelua. Ota täysi ohjain käyttöön asetuksissa, poista sitten Irrigation Unlimited käytöstä ja ota nämä aikataulut käyttöön.",
+        "next-off": "Smart Irrigation ei ole tilassa ”Laske ja kastele”, joten nämä ohjelmat eivät vielä kastele, ja Irrigation Unlimited jatkaa kastelua. Valitse asetuksista ”Laske ja kastele” ja vaihda sitten tämän sivun yläosassa.",
         "open-settings": "Avaa asetukset",
         "next-iu-off": "Uusien ohjelmien aikataulut ovat pois päältä, eikä Irrigation Unlimited ole käynnissä: mitään ei kastella nyt. Tarkista ohjelmat ja ota sitten niiden aikataulut käyttöön.",
-        "next-off-iu-off": "Täysi ohjain on pois päältä, joten nämä ohjelmat eivät vielä kastele, eikä Irrigation Unlimited ole käynnissä: mitään ei kastella nyt. Ota täysi ohjain käyttöön asetuksissa ja sitten ohjelmien aikataulut."
+        "next-off-iu-off": "Smart Irrigation ei ole tilassa ”Laske ja kastele”, joten nämä ohjelmat eivät vielä kastele, eikä Irrigation Unlimited ole käynnissä: mikään ei kastele toistaiseksi. Valitse asetuksista ”Laske ja kastele” ja ota sitten ohjelmien aikataulut käyttöön."
       },
       "conflicts": {
         "zone_twice": "Sekä {zone} että {other} muuttuisivat alueeksi {target}. Valitse toiselle niistä eri alue.",
         "calculated_needs_zone": "Smart Irrigation laskee nyt alueen {zone} siitä alueesta, jolta ajan säätöautomaatio sitä syöttää. Valitse se alue tai jokin muu olemassa oleva.",
-        "program_exists": "Ohjelma ”{name}” ({id}) on tiellä: mikään tuonti ei luonut sitä. Nimeä se uudelleen tai poista se ensin kohdassa Kastelu, Ohjelmat (täysi ohjain päällä).",
-        "supply_exists": "Pumppu ”{name}” ({id}) on tiellä: mikään tuonti ei luonut sitä. Nimeä se uudelleen tai poista se ensin kohdassa Kastelu, Pumput ja venttiilit (täysi ohjain päällä)."
+        "program_exists": "Ohjelma ”{name}” ({id}) on tiellä: mikään tuonti ei luonut sitä. Nimeä se uudelleen tai poista se ensin kohdassa Kastelu, Ohjelmat (kun ”Laske ja kastele” on valittu).",
+        "supply_exists": "Pumppu ”{name}” ({id}) on tiellä: mikään tuonti ei luonut sitä. Nimeä se uudelleen tai poista se ensin kohdassa Kastelu, Pumput ja venttiilit (kun ”Laske ja kastele” on valittu)."
       },
       "confirm_remove": "Tämä tuonti poistaa sen, minkä aiempi tuonti loi ja mitä Irrigation Unlimitedissä ei enää ole: {names}. Jatketaanko?",
       "cutover": {
@@ -1005,7 +1054,7 @@
         "si-waters-now": "Smart Irrigation kastelee: tuodut aikataulut ovat päällä ja Irrigation Unlimitedin ohjaimet pois päältä.",
         "nobody-waters": "Mikään ei kastele: Irrigation Unlimitedin ohjaimet ovat pois päältä, ja niin ovat tuodut aikataulutkin.",
         "both-on": "Molemmat kastelisivat: Irrigation Unlimitedissä on ohjain päällä, ja myös tuotuja aikatauluja on päällä. Poista Irrigation Unlimited käytöstä tai aikataulut.",
-        "full-controller-off": "Täysi ohjain on pois päältä: ota se ensin käyttöön asetuksissa, muuten tuodut ohjelmat eivät kastele.",
+        "full-controller-off": "Smart Irrigation ei ole tilassa ”Laske ja kastele”: valitse se ensin asetuksista, muuten tuodut ohjelmat eivät kastele.",
         "programs": "Tuodut ohjelmat",
         "schedules-on": "{on}/{count} aikataulua päällä",
         "open-programs": "Katso ne Ohjelmat-sivulla ennen kuin vaihdat",
@@ -1024,7 +1073,7 @@
         "confirm-back": "Tuodut aikataulut poistetaan käytöstä, ja Irrigation Unlimitedin ohjaimet otetaan taas käyttöön. Irrigation Unlimited kastelee taas.",
         "errors": {
           "generic": "Se ei onnistunut.",
-          "full_controller_off": "Ota ensin täysi ohjain käyttöön: ilman sitä mikään ei kastele.",
+          "full_controller_off": "Valitse ensin ”Laske ja kastele”: ilman sitä mikään ei kastele.",
           "not_imported": "Mitään ei ole vielä tuotu.",
           "iu_failed": "Irrigation Unlimited ei hyväksynyt vaihtoa. Mitä tämä vaihe oli muuttanut, on peruttu: katso yltä, kuka kastelee.",
           "not_switched": "Kastelua ei ole siirretty Smart Irrigationille, joten ei ole mitään, mistä palata.",
@@ -1041,8 +1090,7 @@
           "uses": "Käyttää: {uses}."
         },
         "left-off": "Jätetty pois päältä, koska ne olivat pois päältä Irrigation Unlimitedissä: {names}.",
-        "unrecorded": "Jätetty pois päältä, koska tuonti ei tallentanut, mitkä niiden aikatauluista olivat päällä Irrigation Unlimitedissä: {names}. Ota niiden aikataulut käyttöön itse, tai palaa Irrigation Unlimitediin, tuo uudelleen (se tallentaa ne) ja vaihda uudelleen.",
-        "main-also-waters": "Pääohjelma kastelee myös {zones} joka päivä liipaisimen mukaan: Irrigation Unlimitedin rinnalla, ja vaihdon jälkeen tuotujen ohjelmien rinnalla, nämä alueet saavat vetensä kahdesti. Jos tuodut ohjelmat kastelevat kaiken, poista pääohjelma käytöstä kohdassa Ohjelmat tai aseta liipaisimeksi Ei mitään."
+        "unrecorded": "Jätetty pois päältä, koska tuonti ei tallentanut, mitkä niiden aikatauluista olivat päällä Irrigation Unlimitedissä: {names}. Ota niiden aikataulut käyttöön itse, tai palaa Irrigation Unlimitediin, tuo uudelleen (se tallentaa ne) ja vaihda uudelleen."
       },
       "notes": {
         "blueprint_zone_gone": "blueprint-automaatio syöttää sitä alueelta {zone}, jota ei enää ole: sitä ei tuoda laskettuna",
@@ -1059,7 +1107,7 @@
         "every_limit": "{every, number} päivän välein: Smart Irrigation menee {max, number} asti",
         "every_not_number": "{value} ei ole päivien määrä",
         "feeds_other_zone": "automaatio syöttää sitä alueelta {from}, mutta se on yhdistetty alueeseen {to}: sen laskettu kesto on sen alueen",
-        "full_controller_off": "täysi ohjain on pois päältä: ohjelmat tuodaan, mutta ne kastelevat vasta, kun se on päällä",
+        "full_controller_off": "Smart Irrigation ei ole tilassa ”Laske ja kastele”: ohjelmat tuodaan, mutta ne kastelevat vasta, kun se on valittu",
         "held_to_limit": "{seconds, number} s rajataan {limit, number} sekuntiin, enempää Smart Irrigation ei salli",
         "lead_kept": "{time} säilyy: sen aikaistaminen pumpun {lead, number} s ennakolla vaihtaisi päivää",
         "lead_time": "alueella ”{zone}” on {lead, number} s ennakkoaika, jonka Smart Irrigation lisää jokaiseen kiinteään ajoon: se kastelee sen verran pidempään kuin IU:ssa, ellei ennakkoaikaa aseteta nollaan tai vaihetta lyhennetä",
@@ -1072,8 +1120,7 @@
         "off_in_iu_matched": "pois päältä IU:ssa ja yhdistetty alueeseen ”{zone}”, joka pysyy ennallaan: ohjelmat jättävät sen pois",
         "offset_limit": "{offset, number} min siirtymä: Smart Irrigation sallii {max, number}",
         "offset_rounded": "{seconds, number} s siirtymä pyöristetään {minutes, number} minuuttiin: Smart Irrigation laskee siinä minuutteina",
-        "one_queue": "{count} ohjainta: niiden ohjelmat ajetaan peräkkäin, koska täydellä ohjaimella on yksi jono",
-        "overlap": "{count} alueella ja sekvenssillä on aikatauluja: missä niiden ajot menevät päällekkäin, IU kastelee ne samaan aikaan, täysi ohjain peräkkäin",
+        "overlap": "{count} alueella ja sekvenssillä on aikatauluja: missä niiden ajot menevät päällekkäin, IU kastelee ne samaan aikaan, Smart Irrigation peräkkäin",
         "passes_held": "{repeats, number} toistoa rajataan {max, number} erään",
         "period_needs_both": "jakso {from}–{until} tarvitsee molemmat päivät: aikataulu on voimassa koko vuoden",
         "program_per_duration": "{count} ohjelmaa, yksi kutakin aikataulun kestoa kohden",
@@ -1099,13 +1146,14 @@
         "zone_keeps_own": "alue ”{zone}” säilyttää omat arvonsa kohteille {kept}",
         "zone_no_valve": "alueella ”{zone}” ei ole venttiiliä: se luodaan, mutta se kastelee vasta, kun venttiili on liitetty",
         "zone_schedule_duration": "alueen aikataulu tarvitsee keston: sitä ei siirretä",
-        "zone_taken": "alue {zone} kuuluu jo kohteelle ”{name}”: se saa oman alueen"
+        "zone_taken": "alue {zone} kuuluu jo kohteelle ”{name}”: se saa oman alueen",
+        "shared_queue": "{count} ohjainta ilman pääventtiiliä: niiden ohjelmat ajetaan peräkkäin, koska vyöhykkeet ilman syöttöä jakavat yhden jonon"
       }
     },
     "skip": {
-      "title": "Ohitus sään perusteella",
-      "description": "Kastelu jätetään odottamaan, kun jokin näistä tarkistuksista täyttyy: ennusteen sade tai sen alkaessa mitattu sade, pakkanen ja tuuli.",
+      "title": "Kastelun ohitus",
       "soil-moisture": "Maaperän kosteus asetetaan aluekohtaisesti, koska jokaisella alueella on oma anturinsa.",
+      "soil-zones": "Maankosteus, asetettu vyöhykkeellä (ohita alkaen):",
       "open-zones": "Avaa alueet"
     }
   },
@@ -1117,7 +1165,7 @@
     "active_default": "Oletus: valmis auringonnousuun mennessä",
     "active_hint": "Vain valittu laukaisin käynnistää kastelun, kerran päivässä. Oletus käynnistää niin, että jokainen alue on valmis auringonnousuun mennessä; vaihtoehdolla Ei mitään Smart Irrigation ei käynnistä mitään.",
     "usage_before": "Kun liipaisin laukeaa, Smart Irrigation lähettää tapahtuman ",
-    "usage_after": " — kuuntele sitä automaatiossa aloittaaksesi kastelun. Tapahtuman tiedot sisältävät kentät trigger_name, trigger_type ja offset_minutes, joten voit reagoida eri tavoin liipaisinkohtaisesti. Sadeohitus- ja kastelujen väliset päivät -asetukset ovat edelleen voimassa: ohituspäivänä tapahtumaa ei lähetetä.",
+    "usage_after": ". Kuuntele sitä automaatiossa aloittaaksesi kastelun. Tapahtuman tiedot sisältävät kentät trigger_name, trigger_type ja offset_minutes, joten voit reagoida eri tavoin liipaisinkohtaisesti. Sadeohitus- ja kastelujen väliset päivät -asetukset ovat edelleen voimassa: ohituspäivänä tapahtumaa ei lähetetä.",
     "add_trigger": "Lisää liipaisin",
     "edit_trigger": "Muokkaa liipaisinta",
     "delete_trigger": "Poista liipaisin",
@@ -1162,7 +1210,7 @@
       "cancel": "Peruuta",
       "save": "Tallenna",
       "delete": "Poista",
-      "help": "Kun tämä liipaisin laukeaa, Smart Irrigation lähettää seuraavan tapahtuman — käytä sitä automaatiossa aloittaaksesi kastelun. Tapahtuman tiedot sisältävät tämän liipaisimen nimen (sekä tyypin/siirtymän), joten voit reagoida juuri siihen:"
+      "help": "Kun tämä liipaisin laukeaa, Smart Irrigation lähettää seuraavan tapahtuman. Käytä sitä automaatiossa aloittaaksesi kastelun. Tapahtuman tiedot sisältävät tämän liipaisimen nimen (sekä tyypin/siirtymän), joten voit reagoida juuri siihen:"
     },
     "offset_auto": "Automaattinen (laskettu vyöhykkeiden kokonaiskestosta)",
     "confirm_delete": "Haluatko varmasti poistaa liipaisimen '{name}'?",
@@ -1192,8 +1240,7 @@
     "multiplier": "Kasvikertoimen kerroin",
     "threshold": "Rajan siirtymä",
     "zones": "Alueet",
-    "zones_hint": "kaikki, tai alueiden numerot pilkuilla erotettuina.",
-    "enabled": "Käytössä"
+    "zones_hint": "kaikki, tai alueiden numerot pilkuilla erotettuina."
   },
   "weather_skip": {
     "title": "Sade-ennuste",
@@ -1204,6 +1251,8 @@
     "effective_rain_description": "Ohita jakson haihdunnan viidennestä pienempi sadekuuro: se kastelee lehdet ja haihtuu. Arvio tehdään koko kahden laskennan väliseltä jaksolta.",
     "forecast_label": "Ota ennustettu sade huomioon",
     "forecast_description": "Kynnysarvon alapuolella kutakin aluetta kastellaan sen vajauksen verran vähennettynä seuraavan 24 tunnin ennustetulla sateella, painotettuna sääpalvelun antamalla todennäköisyydellä: 4 mm:n ennuste 10 mm:n vajauksella kastelee 6 mm. Kynnysarvon kohdalla tai sen yläpuolella kastelu ohitetaan ulkona sijaitsevilta alueilta. Kasvihuoneessa olevia alueita tämä ei koske.",
+    "forecast_no_service": "Tarvitsee sääpalvelun: ennuste tulee siltä.",
+    "forecast_no_service_on": "Ei sääpalvelua: luettavaa ennustetta ei ole, joten tämä ei pidätä mitään.",
     "forecast_set_up_service": "Määritä sääpalvelu"
   },
   "coordinate_config": {
@@ -1219,16 +1268,12 @@
   "days_between_irrigation": {
     "title": "Kastelujen väliset päivät",
     "description": "Määritä vähimmäismäärä päiviä, joiden on kuluttava kastelujen välillä. Tämä auttaa hallitsemaan kastelutiheyttä veden säästämiseksi ja kasvien terveyden ylläpitämiseksi.\n\nTyypillisiä käytännön käyttötapauksia:\n• Nurmikon hoito: 1–2 päivän välit estävät liikakastelun\n• Kuivuusrajoitukset: 6+ päivän välit viikoittaiseen kasteluun\n• Syväjuuriset kasvit: 3–7 päivän välit harvempaan kasteluun\n• Veden säästö: Mukautettavissa ilmaston ja maaperän olosuhteiden mukaan",
-    "label": "Vähimmäismäärä päiviä kastelujen välillä"
+    "label": "Vähimmäismäärä päiviä kastelujen välillä",
+    "own": "Vyöhykkeet, joilla on omat päivät:"
   },
   "planning": {
-    "title": "Suunnittelu",
-    "description": "Mitä ohjelmat kastelevat seuraavien kolmen päivän aikana. Säätä ei tiedetä niin pitkälle eteenpäin: ajo toteutuu, jos mikään ei pidättele sitä.",
-    "nothing_planned": "Yhtään ohjelmaa ei ole suunniteltu. Lisää ohjelmalle aikataulu.",
-    "nothing_to_water": "Ei vielä kasteltavaa: millään tämän ajon vyöhykkeellä ei ole tarpeeksi vajetta.",
-    "expected": "Odotettu kesto:",
+    "now": "Kastelu käynnissä",
     "expected_skipped_precipitation": "Odotetaan ohitettavan: sadetta ennustettu ({mm} mm)",
-    "nothing_now": "Mitään ei kastella juuri nyt.",
     "paused": "Tauolla",
     "paused_until": "Tauolla {when} asti, sitten kastelu jatkuu itsestään.",
     "waiting": "odottaa vuoroaan",
@@ -1238,24 +1283,37 @@
     "no_valve": "Ei liitettyä venttiiliä, joten ei kastella:",
     "nothing_no_valve": "Ei kasteltavaa tässä ajossa: vyöhykkeillä, joilta puuttuu vettä, ei ole liitettyä venttiiliä:",
     "left": "{time} jäljellä",
+    "pass_of": "erä {pass}/{passes}",
+    "soaking": "imeytys, seuraava erä klo {when} ({pass}/{passes})",
+    "starting": "odotetaan, että {supply} käynnistyy",
+    "waits_for": "Odottaa ohjelmaa {program}: noin {start}-{end}.",
+    "after_program": "Alkaa heti ohjelman {program} jälkeen.",
+    "after_program_offset": "Alkaa {minutes} min ohjelman {program} päättymisen jälkeen.",
+    "watered_twice": "{zones} saavat vetensä kahdesti peräkkäin: {program} kastelee ne juuri ennen.",
     "expected_skipped_suspended": "Ei käynnisty: ohjelma on keskeytetty {when} asti"
+  },
+  "timeline": {
+    "title": "Kastelun kulku",
+    "water": "Kastelu",
+    "fill": "Putki täyttyy",
+    "soak": "Imeytyminen",
+    "pass": "kierros {n}",
+    "total": "Yhteensä {time}",
+    "nothing": "Ei kasteltavaa juuri nyt: mikään tämän ohjelman vyöhyke ei tarvitse vettä, tai millään ei ole venttiiliä."
   },
   "programs": {
     "title": "Ohjelmat",
-    "description": "Ohjelma kastelee vaiheensa yksi kerrallaan. Vaihe on yksi vyöhyke tai useampi yhtä aikaa kasteltava, ja se kestää oletuksena sen ajan, jonka Smart Irrigation on sille laskenut. Useita ohjelmia ei koskaan ajeta yhtä aikaa: seuraava odottaa vuoroaan.",
-    "main_description": "Kastelee jokaisen vyöhykkeen, peräkkäin tai yhtä aikaa alla asetetulla tavalla. Sen käynnistää aloitusliipaisin, tai sen omat aikataulut heti kun yksi on käytössä.",
-    "run_options": "Käynnistysasetukset",
+    "description": "Ohjelma kastelee vaiheensa yksi kerrallaan. Vaihe on yksi vyöhyke tai useampi yhtä aikaa kasteltava, ja se kestää oletuksena sen ajan, jonka Smart Irrigation on sille laskenut. Ohjelmat, joiden vyöhykkeet jakavat syötön tai joilla ei ole sitä, eivät koskaan toimi yhtä aikaa: seuraava odottaa vuoroaan. Omalla syötöllään toimivat ohjelmat kastelevat rinnakkain.",
+    "none_yet": "Ei vielä ohjelmia. Vyöhyke kastellaan, kun jokin ohjelma sisältää sen vaiheessa: lisää ohjelma painikkeella Uusi ohjelma.",
+    "run_options": "Tämän käynnistyksen asetukset",
     "adjust_empty": "Anna prosentti tai sekunnit kestojen säätämiseksi.",
     "more_options": "Lisää asetuksia",
     "more_options_set": "lisäsäännöin",
-    "sequencing_title": "Vyöhykkeiden järjestys ja tauot",
-    "others_title": "Muut ohjelmat",
     "confirm_run": "Ajetaanko {name} nyt? Sen venttiilit avautuvat heti.",
     "run_started": "{name} käynnistyi.",
     "run_queued": "{name} on jonossa: se alkaa, kun käynnissä oleva kastelu on päättynyt.",
     "run_nothing": "{name} ei löytänyt mitään kasteltavaa.",
     "run_failed": "{name} ei voinut käynnistyä: {error}",
-    "main_schedules_hint": "Kun yksikään aikataulu ei ole käytössä, tämän sivun alempana asetettu aloitusliipaisin käynnistää pääohjelman. Heti kun yksi aikataulu otetaan käyttöön, aikataulut korvaavat liipaisimen. Sen asetukset säilyvät, ja se palaa, jos poistat aikataulut käytöstä tai poistat ne.",
     "name": "Nimi",
     "step": "Vaihe",
     "step_zones": "Vyöhykkeet",
@@ -1268,23 +1326,37 @@
     "seconds": "Sekuntia vettä",
     "passes": "Kastele useassa erässä",
     "step_delay": "Odotus tämän vaiheen jälkeen",
-    "step_delay_help": "Tyhjä: ohjelman odotus. Negatiivinen: seuraava vaihe alkaa niin kauan ennen tämän päättymistä.",
-    "delay": "Odotus vaiheiden välillä",
-    "delay_help": "Jokaisen vaiheen jälkeen odotettavat sekunnit linjan paineen tai hitaan venttiilin vuoksi. Negatiivinen: jokainen vaihe alkaa niin kauan ennen edellisen päättymistä (ne menevät päällekkäin).",
+    "step_delay_help": "Negatiivinen: seuraava vaihe alkaa niin kauan ennen tämän päättymistä.",
     "tours": "Kierrokset",
     "tours_help": "Koko vaiheluettelo kastellaan näin monta kertaa, jokainen kierros osuudellaan vedestä. Toisin kuin erät, jotka toistavat yhden vaiheen ennen seuraavaa, kierros antaa jokaisen vyöhykkeen imeyttää muiden kastellessa.",
     "enabled": "Käytössä",
     "add_step": "Lisää vaihe",
     "delete_step": "Poista vaihe",
-    "add": "Lisää ohjelma",
+    "add": "Uusi ohjelma",
+    "all_zones_button_title": "Painikkeen Kastele kaikki vyöhykkeet asetukset",
+    "all_zones_now_help": "Vain painikkeelle Kastele kaikki vyöhykkeet: jokainen venttiilillinen vyöhyke, tässä järjestyksessä, näillä erillä ja tällä tauolla. Ohjelmat pitävät omat vaiheensa.",
     "delete": "Poista ohjelma",
     "schedule": "Aikataulu",
     "add_schedule": "Lisää aikataulu",
     "delete_schedule": "Poista aikataulu",
-    "schedule_moment": "Kello",
+    "schedule_moment": "Milloin",
     "moment_time": "Vuorokaudenaika",
     "moment_sunrise": "Auringonnousu",
     "moment_sunset": "Auringonlasku",
+    "moment_azimuth": "Aurinko saavuttaa atsimuutin",
+    "moment_after": "Ohjelman jälkeen",
+    "schedule_after_program": "Ohjelma",
+    "schedule_after_program_help": "Alkaa, kun se ohjelma on todella kastellut ja päättynyt, aikataulustaan tai käsin: ei, jos sää esti sen, se oli keskeytetty, sillä ei ollut kasteltavaa tai se pysäytettiin. Tämän aikataulun päivät ja sää pätevät silti.",
+    "after_missing_short": "ohjelmaa ei löydy",
+    "after_missing": "Ohjelmaa, jota tämä aikataulu odotti, ei enää ole: valitse toinen, muuten se ei koskaan ala.",
+    "schedule_after_offset": "Minuuttia sen päättymisestä",
+    "schedule_after_offset_help": "0: heti. Sen jälkeen se odottaa vuoroaan syötöillään kuten mikä tahansa ajo. Vielä odottava aloitus säilyy uudelleenkäynnistyksen yli ja hylätään, jos se myöhästyy yli kaksi tuntia.",
+    "schedule_anchor_after_help": "Ohjelman jälkeen se aina alkaa: vielä tulevan ajon loppuun ei voi tähdätä.",
+    "after_would_loop": "tekisi silmukan",
+    "summary_after": "ohjelman {program} jälkeen",
+    "delete_blocked_after": "{programs} alkaa tämän ohjelman jälkeen: muuta sitä aikataulua ennen poistamista.",
+    "yaml_chain_loop": "Nämä ohjelmat käynnistäisivät toisensa silmukassa: {programs}",
+    "yaml_unknown_after": "Ei ohjelmaa tällä nimellä tai tunnuksella: {programs}",
     "schedule_time": "Aika",
     "schedule_offset": "Ennen (-) tai jälkeen (+) auringon",
     "schedule_anchor": "Tämä hetki on, kun ohjelma",
@@ -1295,16 +1367,15 @@
     "schedule_weekdays_help": "Yhtään ei valittu: joka päivä.",
     "schedule_every": "Joka",
     "schedule_days": "päivä",
+    "days_count": "{count, plural, one {# päivä} other {# päivää}}",
     "schedule_every_offset": "Siirretty",
     "schedule_every_help": "Joka 3. päivä siirrolla 0, 1 tai 2 antaa kolmen ohjelman vuorotella, yksi päivä kolmesta, ei koskaan samana päivänä.",
     "schedule_parity": "Kuukauden päivät",
-    "parity_any": "Kaikki",
     "parity_even": "Parilliset päivät",
     "parity_odd": "Parittomat päivät",
     "schedule_days_of_month": "Tietyt kuukauden päivät",
     "schedule_days_of_month_help": "Päivien numerot pilkuilla erotettuina, ja ”viimeinen” kuukauden viimeiselle päivälle (esimerkiksi 1, 15, viimeinen). Kuukausi, joka on liian lyhyt jollekin päivälle, ohittaa sen. Tyhjä: mikä tahansa päivä. Se lisätään muihin suodattimiin.",
     "schedule_fallback_time": "Jos ei ole auringonnousua tai -laskua",
-    "schedule_fallback_time_help": "Päivälle, jona aurinko ei nouse tai laske (kaamos tai yötön yö).",
     "schedule_months": "Kuukaudet",
     "schedule_months_help": "Yhtään ei valittu: joka kuukausi.",
     "schedule_from": "Alkaen",
@@ -1313,8 +1384,6 @@
     "schedule_weather": "Huomioi sää",
     "schedule_hard_deadline": "Katkaise ajo päättymisajankohtana",
     "schedule_hard_deadline_help": "Ajo katkaistaan päättymistavoitteessa: avoimet vyöhykkeet suljetaan ja niille hyvitetään se, minkä ne ehtivät kastella, ja se, mikä ei alkanut, ohitetaan.",
-    "schedule_conditions": "Mitkä ehdot",
-    "schedule_conditions_help": "Mikä voi estää tätä aikataulua kastelemasta. Sade, pakkanen ja tuuli asetetaan kohdassa Sää, Ohitus sään perusteella, päivät edellisestä kastelusta kohdassa Asetukset, Yleiset ja maaperän kosteus kullakin alueella. Tämä aikataulu noudattaa niitä kaikkia; poista valinta niistä, jotka sen pitää ohittaa, esimerkiksi sade kasvihuoneelle. Pyytämäsi lykkäys (24 h, 48 h) pätee aina.",
     "condition_postponed": "Lykätyt päivät (aina päällä)",
     "condition_rain_sensor": "Sadeanturi",
     "condition_freeze": "Pakkanen",
@@ -1322,7 +1391,9 @@
     "condition_precipitation": "Sade-ennuste",
     "condition_days_between": "Päiviä edellisestä kastelusta",
     "condition_soil_moisture": "Maaperän kosteus",
-    "schedule_weather_help": "Sade, pakkanen, tuuli, märkä maa ja lykkäämäsi päivät voivat pidätellä ajoa tai lyhentää sitä. Kytke pois kasvihuoneen tippukastelulinjalta, jota se ei kiinnosta.",
+    "conditions_subset": "Vain nämä säätarkistukset",
+    "conditions_pick": "Poista valinta tarkistuksista, jotka tämän aikataulun pitää ohittaa, esimerkiksi sade kasvihuoneelle. Lykätyt päivät pätevät aina.",
+    "schedule_weather_help": "Päällä: kohdan Sää, Kastelun ohitus tarkistukset voivat estää tai lyhentää kastelun: sade, pakkanen, tuuli, kastelujen väliset päivät, märkä maa ja lykätyt päivät. Kytke pois kasvihuoneen tihkuletkulta, jota sää ei koske.",
     "pause": "Tauko",
     "resume": "Jatka",
     "next_step": "Seuraava vaihe",
@@ -1332,17 +1403,17 @@
     "confirm_delete_step": "Poistetaanko tämä vaihe?",
     "confirm_delete_schedule": "Poistetaanko tämä aikataulu?",
     "deleted_zone": "(poistettu vyöhyke)",
-    "controls_help": "Käynnissä olevaa kastelua varten. Tauko sulkee venttiilit ja pysäyttää kaiken; loput kastellaan jatkamisen jälkeen. Seuraava vaihe päättää vyöhykkeet, joissa ohjelma on. Pysäytä päättää kaiken.",
     "max_litres": "Tilavuusraja",
     "max_litres_help": "Tämän vaiheen vyöhyke pysähtyy, kun sen vesimittari on laskenut tämän tilavuuden, litroina tai gallonoina sen mukaan, miten paneeli näyttää tilavuudet. 0: ei rajaa. Mittari raportoi vain silloin tällöin, joten tilavuus ei ole tarkka. Vyöhyke ilman mittaria ohittaa sen.",
     "new_program": "Ohjelma",
-    "main_name": "Pääohjelma",
     "run_now": "Aja nyt",
     "run_seconds": "Kokonaiskesto",
     "run_seconds_help": "Valinnainen. Tyhjä: suunnitellut kestot. Muuten koko ohjelma kestää näin kauan, jaettuna vaiheidensa kesken suunniteltujen kestojen suhteessa.",
     "run_replace": "Korvaa käynnissä oleva",
     "run_replace_help": "Pois: ohjelma odottaa vuoroaan kasteltavan takana. Päällä: kasteltava pysäytetään ensin siististi.",
     "stop_program": "Pysäytä tämä ohjelma",
+    "state_running": "Käynnissä",
+    "state_waiting": "Odottaa vuoroaan",
     "confirm_stop_program": "Pysäytetäänkö ohjelma ”{name}”? Sen avoimet vyöhykkeet suljetaan, tai se poistuu jonosta, jos se odottaa.",
     "min_seconds": "Vähimmäisvesi",
     "max_seconds": "Enimmäisvesi",
@@ -1350,20 +1421,16 @@
     "step_bounds_help": "Järjestys: ensin ohjelman ”Säädä kestoja” -prosentti, kun sellainen on voimassa (se asetetaan ohjelmassa, ei tässä), sitten lisätty tai vähennetty aika, sitten minimi ja maksimi. 0 minimille tai maksimille: ei mitään. Vaihe, joka ei tarvitse vettä, jää nollaan: minimi ei koskaan käynnistä sitä.",
     "min_deficit_mm": "Kastele vain, kun vajaus on vähintään",
     "min_deficit_mm_help": "Millimetreinä, 0 kastelee aina. Asetettuna se korvaa vyöhykkeen oman kynnyksen tässä vaiheessa. Kiinteän keston vaiheet kastellaan aina.",
+    "min_deficit_short": "Vähimmäisvajaus",
     "adjust_title": "Säädä kestoja",
     "adjust_none": "Mitään säätöä ei ole voimassa.",
-    "adjust_active": "Voimassa: {percent} % ja {seconds} s vaihetta kohden, kunnes {until}.",
-    "adjust_until_reset": "se nollataan",
     "adjust_percent": "Prosentti",
     "adjust_hours": "Voimassa",
     "adjust_help": "Saa tämän ohjelman kastelemaan pidempään tai lyhyemmän aikaa asettamisen jälkeen alkavissa ajoissa. Se korvaa edellisen säädön. Tunnit tyhjä: kunnes se nollataan.",
     "adjust_apply": "Käytä",
     "adjust_reset": "Nollaa",
     "confirm_reset_adjustment": "Poistetaanko tämän ohjelman säätö?",
-    "main_settings": "Pääohjelma: aloitus ja järjestys",
-    "main_settings_description": "Miten pääohjelma kastelee: vyöhykkeet peräkkäin tai yhdessä, kahden vyöhykkeen välinen tauko ja cycle and soak. Sen aloitusliipaisin on alla.",
-    "main_schedules_active": "Tällä hetkellä pääohjelman aikataulut käynnistävät kastelun: alla olevaa aloitusliipaisinta ei käytetä. Voit edelleen muokata sitä, ja se palaa, jos poistat nämä aikataulut käytöstä tai poistat ne.",
-    "mode_off": "Täysi ohjain on pois päältä. Ota se käyttöön kohdassa Asetukset, Yleiset.",
+    "mode_off": "Mikään ohjelma ei kastele: Smart Irrigation ei ole tilassa ”Laske ja kastele”. Valitse se kohdassa Asetukset, Yleiset, kohdasta ”Mitä Smart Irrigation tekee”.",
     "no_zone": "ei vyöhykettä",
     "mode_calculated_short": "laskettu",
     "every_day": "joka päivä",
@@ -1375,33 +1442,71 @@
     "schedules_none": "ei aikataulua",
     "schedules_one": "1 aikataulu",
     "schedules_many": "{n} aikataulua",
-    "off": "pois",
+    "no_schedule_on": "ei aikataulua päällä",
     "steps_title": "Vaiheet",
     "schedules_title": "Aikataulut",
-    "passes_help": "Cycle and soak tälle vaiheelle: sen vesi jaetaan näin moneen erään, ja jokainen vyöhyke imeyttää kahden erän välillä pääohjelman asetuksissa määritetyn ajan. 1: kerralla.",
-    "schedule_fallback_skip": "Ohita se päivä",
+    "passes_help": "Cycle and soak tälle vaiheelle: sen vesi jaetaan näin moneen erään, ja jokainen vyöhyke imeyttää kahden erän välillä. 1: kerralla.",
     "schedule_fallback_previous": "Käytä viimeksi nähdyn aikaa",
-    "schedule_fallback_at": "Aloita kiinteään aikaan",
-    "main_steps_hint": "Pääohjelma kastelee kaikki alueet. Jos haluat kastella vain osan niistä tai omassa järjestyksessäsi, lisää ohjelma alle kohtaan Muut ohjelmat.",
     "summary_start_sunrise": "alkaa auringonnousussa",
     "summary_start_sunset": "alkaa auringonlaskussa",
+    "summary_start_azimuth": "alkaa, kun aurinko on {deg}°:ssa",
     "summary_end_sunrise": "valmis auringonnousuun mennessä",
     "summary_end_sunset": "valmis auringonlaskuun mennessä",
+    "summary_end_azimuth": "valmis, kun aurinko on {deg}°:ssa",
     "last_word": "viimeinen",
-    "conditions_none": "Mikään ehto ei ole päällä: sade, pakkanen ja tuuli asetetaan kohdassa Sää, Ohitus sään perusteella, ja päivät edellisestä kastelusta kohdassa Asetukset, Yleiset.",
-    "cond_postponed": "etusivun Lykkää-painikkeet",
-    "cond_off": "pois päältä",
-    "cond_freeze": "{value} tai alle",
-    "cond_wind": "{value} alkaen",
-    "cond_precipitation": "{value} ennusteessa alkaen",
-    "cond_days_between": "vähintään {n} päivää",
-    "cond_soil": "{n} aluetta anturilla",
-    "cond_soil_one": "{n} alue anturilla",
+    "adjust_per_step": "{time} vaihetta kohti",
+    "adjust_short": "{what}, {when} asti",
+    "adjust_short_open": "{what}, kunnes nollataan",
+    "adjust_in_force": "Voimassa: {what}.",
+    "adjust_set": "Aseta säätö",
+    "adjust_change": "Muuta säätöä",
+    "passes_short": "{n} erää",
+    "overlap_short": "aloittaa seuraavan {time} aiemmin",
+    "wait_short": "odottaa {time} ennen seuraavaa",
+    "soak_shared_help": "Yksi imeytysaika kaikille erissä kasteleville vaiheille, kaikissa ohjelmissa.",
+    "min_over_max": "Vähimmäismäärä ylittää enimmäismäärän: enimmäismäärä voittaa, {max}.",
     "confirm_run_replace": "Suoritetaanko {name} nyt? Käynnissä oleva kastelu pysäytetään ensin, sitten sen venttiilit avautuvat.",
     "run_replacing": "Käynnissä ollut kastelu pysäytetään; {name} alkaa heti sen jälkeen.",
     "suspended_until": "Keskeytetty {when} asti: sen aikataulut eivät käynnistä sitä.",
     "suspended": "keskeytetty",
-    "lift_suspension": "Poista"
+    "lift_suspension": "Poista",
+    "preview_title": "Mitä seuraava kastelu tekisi",
+    "preview_help": "Jokainen vyöhyke omalla rivillään, kestoilla, jotka Smart Irrigation kastelisi nyt. Ne seuraavat säätä, joten kastelu voi poiketa alkaessaan.",
+    "yaml_back": "Takaisin editoriin",
+    "yaml_edit": "Muokkaa YAML-muodossa",
+    "yaml_only_title": "Asetettu YAML-muodossa (ei muokattavissa tässä)",
+    "hidden_title": "Näkyy lisätilassa tai YAML-muodossa",
+    "hidden_help": "Asetuksia, jotka tämä lomake näyttää lisätilassa ({where}) tai YAML-muodossa. Ne säilyvät, kun muokkaat tässä.",
+    "yaml_only_help": "Asetuksia, joita visuaalinen editori ei näytä. Ne säilyvät, kun muokkaat tässä.",
+    "yaml_help": "Ohjelma tekstinä. Vaihe nimeää vyöhykkeensä nimellä tai numerolla, ja pois jätetty saa oletusarvonsa. Mitään ei tallenneta ennen käyttöönottoa: alla oleva aikajana näyttää, mitä ohjelma tekisi.",
+    "yaml_apply": "Ota käyttöön",
+    "yaml_invalid": "Tämä ei ole kelvollista YAMLia.",
+    "yaml_not_a_program": "Tämä ei ole ohjelma: ohjelma on joukko avaimia (name, steps, schedules).",
+    "yaml_unknown_zones": "Vyöhykettä ei löydy, tai kahden vyöhykkeen yhteinen nimi, jätetty pois: {zones}",
+    "yaml_not_watered": "Jätetty kastelun ulkopuolelle (ei venttiiliä tai poistettu käytöstä): {zones}",
+    "yaml_applied": "Ohjelma tallennettu",
+    "notify_title": "Ilmoitukset",
+    "notify_help": "Kerro jollekulle, kun tämä ohjelma on kastellut: puhelin, ilmoitusentiteetti tai ilmoitus Home Assistantissa. Mitään ei lähetetä, kun yhtään kohdetta ei ole valittu. Sulkeutumaton venttiili ja vastaamaton pumppu ilmoitetaan heti.",
+    "notify_persistent": "Ilmoitus Home Assistantissa",
+    "notify_when": "Milloin ilmoitetaan",
+    "notify_when_start_and_finish": "Jokaisen kastelun alussa ja lopussa",
+    "notify_when_finish": "Jokaisen kastelun lopussa",
+    "notify_when_problems": "Vain kun jokin menee vikaan",
+    "notify_none": "Home Assistantissa ei ole vielä ilmoituskohdetta: lisää mobiilisovellus tai notify-integraatio.",
+    "schedule_azimuth": "Auringon atsimuutti",
+    "schedule_azimuth_help": "Asteet myötäpäivään pohjoisesta: 90 itä, 180 etelä, 270 länsi. Penkille, jolta muurin tai puun varjo väistyy sillä hetkellä.",
+    "view_flow": "Kaavio",
+    "view_timeline": "Aikajana",
+    "yaml_only_item": "{label}: {value}",
+    "parity_any": "Kaikki",
+    "cond_days_between": "vähintään {n} päivää",
+    "cond_freeze": "{value} tai alle",
+    "cond_off": "pois päältä",
+    "cond_postponed": "etusivun Lykkää-painikkeet",
+    "cond_precipitation": "{value} ennusteessa alkaen",
+    "cond_soil": "{n} aluetta anturilla",
+    "cond_soil_one": "{n} alue anturilla",
+    "cond_wind": "{value} alkaen"
   },
   "supplies": {
     "title": "Pumput ja pääventtiilit",
@@ -1413,7 +1518,6 @@
     "delay_before_help": "Positiivinen: pumppu tai pääventtiili käynnistyy niin kauan ennen kuin vyöhykeventtiili avautuu. Negatiivinen: vyöhykeventtiili avautuu ensin, ja pumppu tai pääventtiili käynnistyy niin kauan sen jälkeen.",
     "delay_after": "Viive jälkeen",
     "delay_after_help": "Positiivinen: pumppu tai pääventtiili pysyy päällä niin kauan vyöhykeventtiilin sulkeutumisen jälkeen. Negatiivinen: se sammuu niin kauan ennen vyöhykeventtiilin sulkeutumista, jotta pumppu ei koskaan paina suljettua venttiiliä vasten.",
-    "enabled": "Käytössä",
     "add": "Lisää pumppu tai pääventtiili",
     "delete": "Poista",
     "confirm_delete": "Poistetaanko ”{name}”? Sitä käyttävillä vyöhykkeillä ei ole enää pumppua eikä pääventtiiliä.",
@@ -1424,18 +1528,13 @@
     "title": "Havaittu kastelu (suljettu silmukka)",
     "description": "Hyvitä jokaisen vyöhykkeen vesitase automaattisesti todellisesta kastelusta sen sijaan, että nollaisit vesitaseen automaatiosta. Kun tämä on käytössä, valitse venttiili-/kytkinentiteetti kullekin vyöhykkeelle Vyöhykkeet-välilehdellä: kun se on auki, vesitaseeseen hyvitetään käyntiaika ja vyöhykkeen läpäisy. Tarkkaa kirjanpitoa varten voit myös valita kumulatiivisen tilavuusmittarin (vesimittarityyppinen kokonaislukema) kullekin vyöhykkeelle, jolloin käytetään mitattua tilavuutta. Tärkeää: kun tämä on käytössä, se on ainoa asia, joka hyvittää vesitaseen, joten poista kaikki set_bucket- ja reset_bucket-kutsut kasteluautomaatiostasi kaksinkertaisen laskennan välttämiseksi.",
     "enabled_label": "Ota havaittu kastelu käyttöön",
-    "direct_control_label": "Anna Smart Irrigationin ohjata venttiiliä",
-    "direct_control_description": "Kun tämä on käytössä, Smart Irrigation avaa kunkin vyöhykkeen liitetyn venttiilin, odottaa lasketun keston ja sulkee sen sitten, ilman automaatiota. Käynnissä oleva ajo jatkuu uudelleenkäynnistyksen jälkeen. Turvallisuus: venttiili, joka osaa sulkeutua itse, saa avautuessaan ajon keston (Sonoff SWV ZHA:ssa tai venttiili, jonka vyöhykkeelle on asetettu MQTT-turva-aihe), joten se sulkeutuu, vaikka Home Assistant kaatuisi. Mikä tahansa muu venttiili jatkaa kastelua, kunnes Home Assistant palaa: anna sille laitteistotason vikaturva (enimmäiskäyntiaika).",
-    "full_controller_label": "Täysi ohjain: Smart Irrigation hoitaa kaiken kasteluni",
-    "full_controller_title": "Täysi ohjain",
-    "confirm_full_controller": "Otetaanko täysi ohjain käyttöön? Smart Irrigation ohjaa silloin venttiilejä ja käynnistää kastelun itse. Käynnistyksessä avoimena löytynyt venttiili, jota mikään meidän ajomme ei omista, suljetaan.",
-    "full_controller_description": "Ottaa venttiilien ohjauksen käyttöön ja lisää Kastelu-välilehden: ohjelmat, suunnittelu ja pumput. Aloitusliipaisin, järjestys, vyöhykkeiden välinen tauko ja cycle and soak siirtyvät sinne pääohjelman asetuksina ja toimivat kuten ennen, kunnes lisäät toisen ohjelman. Pois kytkettynä palaa täsmälleen aiempi toiminta. Käynnistyksessä avoimena löytynyt venttiili, jota mikään meidän ajomme ei omista, suljetaan.",
+    "confirm_full_controller": "Laske ja kastele? Smart Irrigation avaa silloin venttiilit ja käynnistää kastelun itse ohjelmillaan. Käynnistyksessä avoimena löytynyt venttiili, jota mikään meidän ajomme ei omista, suljetaan.",
     "sequencing_label": "Vyöhykkeiden järjestys",
     "sequencing": {
       "sequential": "Peräkkäin (yksi vyöhyke kerrallaan)",
       "parallel": "Rinnakkain (kaikki vyöhykkeet kerralla)"
     },
-    "sequencing_description": "Miten alueesi kastellaan. Tämä määrää, mistä kestosta aloitusliipaisin laskee taaksepäin, kun sen on määrä päättyä auringonnousuun: yksi kerrallaan antaa kaikkien alueiden aikojen summan, kaikki yhtä aikaa niistä pisimmän. Tämä pätee, avaako Smart Irrigation venttiilit itse vai tekeekö sen oma automaatiosi.",
+    "sequencing_description": "Aloitusliipaisin, jonka on määrä päättyä auringonnousuun, laskee siitä taaksepäin: yksi kerrallaan, aikojen summasta; kaikki yhtä aikaa, pisimmästä.",
     "passes_label": "Kastele useassa erässä",
     "passes_description": "Jaksotus ja imeytys: sama vesimäärä jaettuna lyhyempiin kierroksiin, joiden välissä on tauko, jotta raskas maa ottaa sen sisään sen sijaan että se valuisi pois. Yksi kierros kastelee kertaheitolla, ja se on oletus. Kastelua, joka on liian lyhyt jaettavaksi, ei kosketa.",
     "soak_label": "Imeytys erien välissä",
@@ -1443,7 +1542,10 @@
     "pause_between_zones_description": "Odotus kahden alueen välillä peräkkäisessä kastelussa: aikaa linjan paineen palautumiselle tai hitaan venttiilin sulkeutumiselle ennen kuin seuraava avautuu.",
     "minutes": "minuuttia",
     "seconds": "sekuntia",
-    "direct_control_locked": "Täysi ohjain ohjaa venttiilejä: kytke se ensin pois muuttaaksesi tätä."
+    "set_aside_label": "Siirrä vyöhyke sivuun näin monen epäonnistuneen kastelun jälkeen",
+    "set_aside_description": "Venttiili, joka näin monta kertaa peräkkäin ei auennut, ei antanut vettä tai jonka omaa ajastinta ei voitu asettaa, siirretään sivuun: mikään ohjelma ei kastele vyöhykettä ennen kuin se otetaan takaisin käyttöön, sen sijaan että se epäonnistuisi joka aamu. Saat tiedon heti (ohjelmien ilmoitukset, korjaus Home Assistantissa, vyöhykkeen ongelma-anturi). Se palaa itsestään, kun sen venttiilin nähdään aukeavan, käsin kokeiltuna korjauksen jälkeen. 0: ei koskaan.",
+    "leak_label": "Vuotohälytys alkaen",
+    "leak_description": "Jos vyöhykkeen vesimittari laskee näin monta litraa kaikkien venttiilien ollessa kiinni, ilmoitetaan vuodosta: keskittimen Vuoto-anturi, tapahtuma smart_irrigation_leak, korjaus ja ohjelmien ilmoitukset. Vain mittarille, joka mittaa pelkkää puutarhaa: talon mittari laskee myös hanat. 0: ei valvota."
   },
   "calculation_log": {
     "title": "Laskentaloki",
@@ -1459,7 +1561,6 @@
   "measured_skip": {
     "title": "Ohita mitattujen olosuhteiden perusteella",
     "description": "Tarkistetaan jokaisen kastelun alussa, anturista tai sääpalvelusta. Anturi, jota ei saada luettua, ei koskaan estä kastelua.",
-    "enabled": "Käytössä",
     "threshold": "Raja",
     "sensor": "Anturi",
     "sensor-optional": "Anturi (valinnainen)",
@@ -1541,24 +1642,26 @@
         "running": "käynnissä",
         "waiting": "odottaa",
         "paused": "tauolla",
-        "suspended": "keskeytetty",
-        "disabled": "poistettu käytöstä"
+        "suspended": "keskeytetty"
       },
-      "main_name": "Pääohjelma"
+      "after": "alkaa ohjelman {name} jälkeen",
+      "next_in_line": "alkaa seuraavaksi"
     },
     "editor": {
       "title": "Otsikko",
       "zones": "Vyöhykkeet (kaikki, jos tyhjä)",
       "show_next_start": "Näytä seuraava käynnistys",
       "compact": "Vain vyöhykkeet, jotka kastelisivat",
-      "show_programs": "Näytä ohjelmat (täysi ohjain)"
+      "show_programs": "Näytä ohjelmat"
     },
     "no_valve": "ei liitettyä venttiiliä, ei kastella",
     "no_trigger": "Ei aloitusliipaisinta",
     "not_scheduled": "Erääntynyt, mutta ei ajastettu",
     "off": "Pois päältä",
     "watering_left": "kastellaan, {time} jäljellä",
-    "paused_left": "tauolla, {time} jäljellä"
+    "paused_left": "tauolla, {time} jäljellä",
+    "soaking": "imeytys, seuraava erä klo {when} ({pass}/{passes})",
+    "pass_of": "erä {pass}/{passes}"
   },
   "confirm": {
     "delete_zone": "Poistetaanko vyöhyke \"{name}\"? Sen asetukset ja vesitase menetetään.",
@@ -1567,5 +1670,65 @@
     "reset_bucket": "Nollataanko vyöhykkeen \"{name}\" vesitase?",
     "reset_all_buckets": "Nollataanko kaikkien vyöhykkeiden vesitase?",
     "clear_all_weather": "Tyhjennetäänkö kaikki kerätyt säätiedot? Seuraavassa laskennassa on vain sen jälkeiset mittaukset."
+  },
+  "notify": {
+    "title_done": "{program}: kastelu valmis",
+    "title_problem": "{program}: ongelma",
+    "title_started": "{program}: kastelu alkaa",
+    "zone_line": "{zone}: {minutes} min",
+    "zone_volume": ", {litres} l",
+    "problem_line": "{zone}: {reason}",
+    "nothing": "Mikään vyöhyke ei tarvinnut vettä.",
+    "stopped": "Pysäytetty ennen loppua.",
+    "cut": "Lyhennetty, jotta se valmistuu ajoissa.",
+    "reasons": {
+      "valve_did_not_open": "venttiili ei auennut",
+      "valve_did_not_close": "venttiili ei sulkeutunut",
+      "no_flow": "venttiili aukesi, mutta vettä ei virrannut",
+      "valve_timer_not_set": "venttiilin omaa ajastinta ei voitu asettaa, se pysyi kiinni",
+      "supply_did_not_turn_on": "pumppu tai pääventtiili ei käynnistynyt",
+      "supply_did_not_turn_off": "pumppu tai pääventtiili ei pysähtynyt",
+      "zone_set_aside": "siirretty sivuun useiden epäonnistumisten jälkeen: ei kastella ennen käyttöönottoa"
+    },
+    "title_leak": "Vettä virtaa kaikkien venttiilien ollessa kiinni",
+    "leak_line": "{litres} l laskettu venttiilien ollessa kiinni ({zones}). Tarkista vuoto tai auki jäänyt venttiili."
+  },
+  "week": {
+    "title": "Seuraavat päivät",
+    "help": "Jokainen kastelu on lohko ohjelmansa värissä; viivoitettuna imeytystauot; haaleana kastelu, jonka sää voi estää. Vie osoitin lohkon päälle nähdäksesi vyöhykkeet, napsauta avataksesi ohjelman. Tulevat päivät riippuvat ennusteesta.",
+    "days": "{n} päivää",
+    "today": "Tänään",
+    "tomorrow": "Huomenna",
+    "held": "Sää voi estää sen",
+    "nothing": "Ei kasteltavaa",
+    "done": "Valmis",
+    "running": "Käynnissä",
+    "empty": "Ei suunniteltuja ohjelmia."
+  },
+  "flow": {
+    "start": "Aloitus",
+    "by_hand": "Käynnistetty käsin",
+    "weather": "Salliiko sää?",
+    "weather_sub": "Sade, pakkanen, tuuli…",
+    "weather_yes": "Kyllä",
+    "weather_yes_unread": "Kyllä, mutta kohdetta {reason} ei voitu lukea",
+    "weather_no": "Ei: {reason}",
+    "otherwise": "Muuten: ei mitään sinä päivänä",
+    "supply_on": "{name} päälle",
+    "supply_before": "{time} ennen venttiileitä",
+    "supply_after_valves": "{time} venttiilien jälkeen",
+    "supply_off": "{name} pois",
+    "supply_after": "{time} jälkeen",
+    "step": "Vaihe {n}",
+    "together": "yhdessä",
+    "passes": "{n} kierrosta",
+    "soak": "{time} imeytymistä kierrosten välillä",
+    "wait": "odota {time}",
+    "overlap": "limittyy {time}",
+    "tours": "Kaikki uudelleen, {n} kierrosta",
+    "notify": "Ilmoitus",
+    "empty": "Ei kasteltavaa nyt.",
+    "idle": "Ei vedentarvetta nyt",
+    "no_water": "ei mitään nyt"
   }
 }

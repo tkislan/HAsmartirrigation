@@ -114,7 +114,10 @@
           "name": "名称",
           "size": "面积",
           "throughput": "流量",
-          "throughput-help": "这个区域每分钟出多少水。能测就实测，而不要照抄产品参数表：所有时长都是由它推出来的，而它也是最不声不响地让你浇两倍时长的原因。"
+          "throughput-help": "这个区域每分钟出多少水。能测就实测，而不要照抄产品参数表：所有时长都是由它推出来的，而它也是最不声不响地让你浇两倍时长的原因。",
+          "valve": "阀门",
+          "valve-help": "浇灌此区域的阀门或开关。没有它，区域会被计算但不会浇水，直到你在“区域”中关联一个。",
+          "valve-help-calculate": "如果 Smart Irrigation 需要知道此区域何时被手动或由你的自动化浇水，以便计入这些水。"
         },
         "environment": {
           "question": "它长在哪里？",
@@ -152,12 +155,21 @@
         "review": {
           "question": "可以创建了",
           "zone": "区域",
+          "program": "浇水程序",
+          "new-program": "新程序",
           "environment": "环境",
           "engine": "模块",
           "sources": "数据源",
           "from-the-service": "来自天气服务",
           "no-sensor": "无传感器",
-          "help": "这会创建一个计算模块、一个传感器组和一个区域，和用其他标签页创建的完全一样。之后一切都可以再改。"
+          "help": "这会创建一个传感器组和一个区域，与其他选项卡完全相同。之后没有任何锁定。",
+          "mode": "Smart Irrigation",
+          "no-valve": "无"
+        },
+        "mode": {
+          "question": "Smart Irrigation 应该做什么？",
+          "water-help": "它计算每个区域需要多少水，并自己打开阀门，由一个程序浇灌你的区域，在日出前完成。之后可以修改它的时间表。",
+          "calculate-help": "它计算每个区域的需求；由你的自动化、Irrigation Unlimited 或控制器打开阀门。"
         }
       },
       "step": "步",
@@ -170,7 +182,11 @@
       "calc-nothing": "已计算：它目前还不缺水。",
       "calc-failed": "计算没有成功。原因显示在“区域”下的该区域中。",
       "open-zone": "打开区域",
-      "another": "再设置一个区域"
+      "another": "再设置一个区域",
+      "done-next-added": "它现在是 {program} 的最后一步，按该程序的时间表浇水。你可以在“浇水”中找到它。",
+      "done-next-new-program": "新程序 {program} 每天浇灌它，在日出前完成。你可以在“浇水”中找到它。",
+      "new-program-name": "浇水",
+      "done-next-no-valve": "在“区域”中为它关联一个阀门，才能浇水。"
     },
     "weatherservice": {
       "history": {
@@ -182,7 +198,7 @@
         "no-data": "还没有从天气服务获取到数据。"
       },
       "title": "天气服务",
-      "description": "查看并更改用于获取天气数据的天气服务——无需重新安装集成。API 密钥将被验证，更改会立即生效。",
+      "description": "查看并更改用于获取天气数据的天气服务，无需重新安装集成。API 密钥将被验证，更改会立即生效。",
       "labels": {
         "use-weather-service": "使用天气服务",
         "service": "天气服务",
@@ -196,7 +212,7 @@
         "open-sensor-groups": "打开传感器组"
       },
       "messages": {
-        "no-service": "未使用任何天气服务——天气数据仅来自您自己的传感器。",
+        "no-service": "未使用任何天气服务：天气数据仅来自您自己的传感器。",
         "saved": "天气服务已更新并应用。",
         "reload-note": "保存时会针对该服务验证 API 密钥并立即应用更改。",
         "owm-onecall-hint": "OpenWeatherMap 需要 One Call API 3.0 套餐（One Call by Call）。每天 1000 次调用以内免费，但必须绑卡激活，而且新密钥可能要过一两个小时才能生效。普通的默认密钥会被拒绝。",
@@ -227,7 +243,7 @@
       },
       "messages": {
         "exported": "备份文件已下载。",
-        "restored": "配置已恢复——正在重新加载集成。",
+        "restored": "配置已恢复：正在重新加载集成。",
         "invalid-file": "此文件不是有效的 Smart Irrigation 备份。",
         "confirm-title": "替换整个配置？",
         "summary": "此备份包含",
@@ -239,13 +255,15 @@
       "cards": {
         "automatic-duration-calculation": {
           "header": "浇水时长的计算",
-          "description": "每个区域的浇水时长来自它的水量平衡：天气从土壤中带走的水量，减去降雨。在这里你可以选择何时计算。是什么启动浇水，则由别处的启动触发器决定。",
+          "description": "每个区域的浇水时长来自其水分平衡：天气从土壤带走的水，减去降雨。在此选择何时计算。",
           "labels": {
             "calc-when": "浇水时长的计算时机",
             "calc-when-time": "在固定时间",
             "calc-when-start": "每次启动之前",
             "calc-when-manual": "仅在我要求时",
-            "calc-when-hint": "每次启动之前：在启动触发器的时间，使用最新的天气数据。当由 Smart Irrigation 启动浇水时（直接控制阀门或启动事件），这是正确的选择。在固定时间：每天在下方设定的时间，适用于由 Smart Irrigation 以外的程序启动浇水、并在自己方便时读取时长的情况（Irrigation Unlimited、你自己的计划）。仅在我要求时：不会自动计算任何内容，请使用计算按钮或服务。",
+            "calc-when-hint": "每次启动前：在程序或启动事件开始时，使用最新的天气；由 Smart Irrigation 启动浇水时的正确选择。固定时间：每天在下方时间计算，适用于由其他方式启动浇水并随时读取时长的情况。仅在我要求时：不会自动计算，请使用计算按钮或动作。“每次启动前”也会保留下方时间的每日计算，让水分平衡在两次启动之间继续更新。",
+            "calc-when-start-event": "启动事件之前",
+            "calc-when-hint-calc-only": "启动事件之前：在启动触发器触发时，使用最新的天气计算，让依此事件浇水的设备获得最新的时长。固定时间：每天在下方时间计算，适用于由你自己的自动化或控制器随时读取时长的情况。仅在我要求时：不会自动计算，请使用计算按钮或动作。“启动事件前”也会保留下方时间的每日计算，让水分平衡在两次事件之间继续更新。",
             "calc-time": "计算时间",
             "calc-time-hint": "每日计算：流失的水量会加入每个区域的水量平衡，并设定浇水时长。",
             "hourly-calculation": "逐小时计算蒸散量",
@@ -280,7 +298,6 @@
           }
         },
         "panel-mode": {
-          "header": "面板",
           "labels": {
             "advanced": "高级设置",
             "advanced-hint": "显示用于微调模型的设置：排水、阈值、系数、区域往前看多远。它们都有合理的默认值；除非你确定需要，就保持关闭。无论哪种情况，你的取值都会保留。"
@@ -296,13 +313,17 @@
         },
         "master-switch": {
           "title": "Smart Irrigation",
-          "label": "计算并浇水",
-          "description": "关闭后，Smart Irrigation 仍会获取天气数据并保留其传感器，但不进行任何计算，各区域的水量平衡保持不变，不打开任何阀门，也不运行任何程序。重新打开后，关闭期间的时间不计入。",
+          "mode": "Smart Irrigation 做什么",
+          "mode-water": "计算并浇水",
+          "mode-calculate": "仅计算",
+          "mode-off": "全部停止",
           "off-note": "已关闭：不计算，也不浇水。天气数据照常获取，重新打开时不会计入关闭期间的时间。",
-          "confirm-off": "关闭 Smart Irrigation？正在进行的浇水会立即停止，在重新打开之前不会计算或浇水。"
+          "calculate-note": "仅计算：Smart Irrigation 计算水量平衡和时长并发送开始事件，但不打开任何阀门。由你的自动化、Irrigation Unlimited 或控制器按这些时长浇水。",
+          "confirm-off": "关闭 Smart Irrigation？正在进行的浇水会立即停止，在重新打开之前不会计算或浇水。",
+          "confirm-calculate": "仅计算？Smart Irrigation 将不再打开阀门：正在进行的浇水会立即停止，此后由你的自动化按其时长浇水。",
+          "water-note": "计算并浇水：Smart Irrigation 计算每个区域需要多少水，并用它的程序自己打开阀门。每个程序按自己的时间表浇灌其步骤中的区域。"
         }
       },
-      "description": "此页面提供全局设置。",
       "title": "常规",
       "sections": {
         "calculation": "计算",
@@ -311,8 +332,7 @@
         "calculation-sub": "每个区域需要多少水，以及何时计算。",
         "control-sub": "由什么打开阀门，由什么启动一次浇水。",
         "system-sub": "面板、蓝图、设置向导，以及从 Irrigation Unlimited 迁移。"
-      },
-      "moved-to-weather": "天气服务、位置、读取天气的频率以及跳过检查都在此选项卡中："
+      }
     },
     "help": {
       "title": "帮助",
@@ -354,7 +374,7 @@
           "calc-daily": "每天 {time}",
           "calc-before-start": "每次启动前",
           "calc-manual": "仅在您要求时",
-          "main-schedules": "由主程序的时间表启动（启动触发器暂不使用）",
+          "program-schedules": "由程序的时间表启动",
           "accounts-for-duration": "往回推算，使浇水正好在那时结束",
           "starts-at-trigger": "在那一刻开始",
           "sequencing-sequential": "一次一个区域，所以总时长是所有区域相加",
@@ -364,7 +384,6 @@
           "sub-nothing": "还没有区域缺水到需要浇的程度。下一次启动会是 {start}。",
           "headline-not-calculated": "尚未计算",
           "sub-not-calculated": "区域在首次计算之前没有时长（计算时机：{when}）。要立即计算，请在“区域”下计算所有区域。",
-          "next-program": "下一个程序：{program}，{start}",
           "headline-watering": "{start} 浇水",
           "headline-watering-soon": "下次启动时浇水",
           "sub-watering": "{count} 个区域，共 {duration}。",
@@ -382,7 +401,12 @@
           "headline-off": "Smart Irrigation 已关闭",
           "sub-off": "它仍会获取天气数据，但在重新打开之前不计算也不浇水。",
           "open-settings": "打开设置",
-          "sub-watering-one": "1 个区域，{duration}。"
+          "sub-watering-one": "1 个区域，{duration}。",
+          "next-runs": "接下来",
+          "run-waits": "等待 {program}，约 {start} 至 {end}",
+          "run-skipped": "预计会被跳过：预报有雨",
+          "run-twice": "{zones} 连续浇两次",
+          "run-suspended": "已挂起至 {when}"
         },
         "decision": {
           "title": "会被跳过吗？",
@@ -417,7 +441,8 @@
           "detail-raining": "正在下雨",
           "detail-dry": "没有下雨",
           "detail-held": "这次不参与",
-          "check-postponed": "由你推迟"
+          "check-postponed": "由你推迟",
+          "title-next": "下一次浇水会被跳过吗？"
         },
         "estimate": {
           "title": "各区域当前的状况",
@@ -455,7 +480,14 @@
           "left": "剩余 {time}（{percent} %）",
           "program": "程序",
           "step": "步骤 {step}/{steps}",
-          "program-left": "剩余 {time}"
+          "program-left": "剩余 {time}",
+          "headline-soaking": "两段之间正在渗透",
+          "headline-starting": "浇水正在启动",
+          "pass": "第 {pass} 段，共 {passes} 段",
+          "at-most": "最多 {volume}",
+          "soaking": "正在渗透，下一段于 {when}（第 {pass} 段，共 {passes} 段）",
+          "starting": "等待 {supply} 启动",
+          "then": "然后：{names}，等待轮到它们"
         }
       },
       "gaps": {
@@ -469,7 +501,7 @@
         },
         "no_valve_path": {
           "title": "这里没有任何东西会打开阀门",
-          "body": "Smart Irrigation 计算要浇多久；需要有东西照此行动。要么在“设置”下打开直接阀门控制，然后为每个区域关联一个阀门，要么针对启动事件写一个自动化（蓝图会替你做好）。如果已经有自动化在做这件事，就无需改动。",
+          "body": "Smart Irrigation 计算浇水时长，但需要有东西去执行。要么在设置中选择“计算并浇水”，并为每个区域关联一个阀门；要么针对启动事件编写自动化（蓝图会替你完成）。如果已有自动化在执行，就无需更改。",
           "action": "前往阀门控制"
         }
       }
@@ -552,9 +584,6 @@
           },
           "greenhouse": "温室",
           "greenhouse_description": "封闭环境：温室、塑料大棚，以及任何玻璃或塑料覆盖之下的地方。雨到不了这些区域，因此降水不计入它们的水量平衡，相关字段也会隐藏。有两项需要你自己设置，因为无法推测：给风速一个接近 0 的静态值，因为计算假定的是露天；太阳辐射用光照传感器，因为覆盖材料会过滤天空。",
-          "module": "模块",
-          "module_description": "该组只提供这个模块会读取的数据源。使用它的区域会继承这一选择。",
-          "module_undecided": "还没有选择模块，所以会提供全部数据源，使用该组的每个区域都保留各自的选择。选定一个后，就只会看到它会读取的数据源。",
           "wind_height": "风速计高度（留空：按 2 米）",
           "rain_not_from_entity": "天气实体不提供已降的雨，只提供预报：请在此选择雨量传感器，否则每场阵雨后区域都会被浇水。",
           "rain_hint_entity": "当前正在下的雨，以强度表示。天气实体只预报降雨：请选择一个测量降雨的传感器。"
@@ -683,8 +712,8 @@
         "data-number-of-data-points": "数据点数量",
         "drainage_rate": "排水速率",
         "linked-entity": "关联的阀门/开关",
-        "linked-entity-hint": "为该区域浇水的阀门或开关。每当它运行时（手动开启、自动化，或在启用直接阀门控制时由 Smart Irrigation 自身运行），都会根据运行时间和该区域的流量为水量平衡计入水量。闭环功能需要此项。",
-        "valve-off": "开启直接阀门控制或实测浇水后，才能关联阀门。",
+        "linked-entity-hint": "为此区域浇水的阀门或开关。选择“计算并浇水”时，Smart Irrigation 会打开和关闭它。启用观测浇水时，它的每次运行（手动、自动化或 Smart Irrigation）都会按运行时间和流量计入水分平衡。",
+        "valve-off": "当 Smart Irrigation 负责浇水（计算并浇水）或已开启观察浇水时，即可关联阀门。",
         "valve-off-link": "开启",
         "supply": "水泵或总阀",
         "supply-none": "无",
@@ -694,9 +723,11 @@
         "extra-valves-hint": "与它一同打开和关闭",
         "flow-sensor": "累计水量计",
         "flow-sensor-hint": "若需精确计量而非以流量×时间估算：请提供一个累计用水总量（状态类别为 total_increasing），而非瞬时流速。单位会自动读取（L、mL、m³、gal、ft³）。",
+        "observed-ignore-seconds": "忽略不超过此时长的运行",
+        "observed-ignore-seconds-help": "阀门运行不超过此时长时不计入水量平衡：炎热午后为叶片降温的几分钟水大多会蒸发。更长的运行全部计入。留空：每次运行都计入。",
         "confirm-timeout": "等待阀门确认",
         "open-resends": "重新发送开启命令",
-        "confirm-timeout-help": "阀门报告已开启或已关闭的等待时间，以及在此期间重新发送开启命令的次数。留空则使用默认值：8 秒且不重发，或使用完整控制器时 30 秒并重发两次，关闭为 5 秒。Gardena 等云端阀门确认较慢，且每条命令都计入配额：请设置更长的等待时间和 0 次重发。关闭总会再尝试一次。",
+        "confirm-timeout-help": "阀门报告已开启或已关闭的等待时间，以及在此期间重新发送开启命令的次数。留空：30 秒并重发两次；关闭为 5 秒，总是尝试两次。Gardena 等云端阀门：等待更久、0 次重发，每条命令都计入配额。",
         "safety-off-topic": "安全关闭 MQTT 主题",
         "safety-off-state-key": "安全关闭状态键",
         "safety-off-mode": "安全关闭模式",
@@ -704,6 +735,10 @@
         "safety-off-mode-zha": "ZHA 定时关闭",
         "safety-off-mode-off": "关（无死人开关）",
         "safety-off-mode-help": "如果 Home Assistant 在运行途中停止，阀门会自行关闭。自动模式在有 MQTT 主题时使用上面的主题，ZHA 上的 Sonoff SWV 则会自动启用。ZHA 定时关闭还会用标准的定时关闭命令为其他任何 ZHA 阀门启用，该命令在其他型号上未经验证。“关”则不会为该区域启用硬件死人开关。",
+        "safety-off-required": "如果无法设置阀门自身的定时器",
+        "safety-off-required-open": "仍然浇水",
+        "safety-off-required-skip": "保持阀门关闭",
+        "safety-off-required-help": "每次浇水都会为阀门设置其自身的定时器，这样即使 Home Assistant 在浇水途中停止，阀门也会自行关闭。如果设置失败（阀门休眠、MQTT 不可用），默认仍会浇水，但没有这层保护。选择“保持阀门关闭”则会跳过这次浇水：区域会报告问题，欠下的水量会计入下一次浇水。",
         "safety-off-topic-help": "可选的硬件死人开关。阀门设备监听的 MQTT set 主题（例如 zigbee2mqtt/my_valve/set）。Smart Irrigation 会在那里发布“开启并定时关闭”，这样即使 Home Assistant 在运行中途停止、始终没有发出关闭指令，设备也会自行关闭阀门。状态键是设备的开/关属性（“state”，多通道设备则为“state_l1”到“state_l4”）。是否支持取决于设备固件（on_time）：依赖它之前请先测试。留空则禁用。",
         "optional": "可选",
         "irrigation-threshold": "灌溉阈值",
@@ -730,7 +765,7 @@
         "available-water-help": "该区域的土壤能为植物保持多少水，单位 mm（根系深度（米）乘以每米土壤的持水量：沙土约 50 至 110 mm，壤土 130 至 180，黏土 120 至 200，依据 FAO-56）。留空则保持现状。设置后，亏缺不会超过该值，而且植物用掉允许的比例后（默认 50%，可修改）吸水会减少，所以亏缺增长得不那么快。",
         "distribution-efficiency": "分布效率",
         "distribution-efficiency-help": "从出水器流出的水中到达植物的比例，单位 %。喷头在有风或坡地上会损失一部分，滴灌几乎没有损失。留空表示 100%。效率 80% 的区域，为达到同样的水深要多浇 25% 的时间，并且只记入其出水量的 80%。",
-        "days-between-irrigation-help": "留空则遵循全局设置（设置，灌溉间隔天数）。填入数字则仅对该区域替代全局设置：1 表示只要需要就每天浇水，3 表示最多每三天一次，0 表示取消限制。天数从该区域上次浇水时算起。",
+        "days-between-irrigation-help": "留空则遵循全局设置（天气，取消浇水）。填入数字则仅对该区域替代全局设置：1 表示只要需要就每天浇水，3 表示最多每三天一次，0 表示取消限制。天数从该区域上次浇水时算起。",
         "soil-moisture-sensor": "土壤湿度传感器",
         "soil-moisture-sensor-hint": "只要土壤湿度等于或高于阈值，该区域就跳过本次浇水。水量平衡会保留。",
         "soil-moisture-threshold": "达到或超过此值时跳过",
@@ -746,6 +781,8 @@
           "fixed": "固定的量"
         },
         "forecast-days": "向前预判",
+        "coastal": "沿海地点",
+        "coastal-help": "仅在没有辐射传感器或服务、根据温度估算太阳辐射时使用：在海边或大湖边，白天更温和，FAO-56 在此使用另一系数。",
         "forecast-days-help": "0：区域只补天气实际带走的水。1：把明天也算进来，2：明天和后天，以此类推。接下来的几天越热，今天浇的就越多。这不是因下雨而跳过，那是另外一项设置。",
         "fixed-amount": "每日蒸发量",
         "engine-shared-help": "这项设置只属于这个区域：每个区域都有自己的一份，在这里改动不会影响别处。",
@@ -774,7 +811,10 @@
         },
         "duration-readonly-automatic": "已为你算好：该区域的浇水时长来自它的水量平衡。想自己填时长，请把它改为手动。",
         "duration-readonly-disabled": "已停用的区域永远不会浇水，所以没有浇水时长。",
-        "et-deficiency-help": "该区域每天需要的量：ETc，即参考蒸散量乘以作物系数，已包含季节性调整。它在按时间间隔换算之前、在扣除降雨之前，正因如此不同配置之间才可以互相比较。区域传感器还单独带有参考值，作为 `eto` 属性，便于和天气服务公布的数值对照。"
+        "et-deficiency-help": "该区域每天需要的量：ETc，即参考蒸散量乘以作物系数，已包含季节性调整。它在按时间间隔换算之前、在扣除降雨之前，正因如此不同配置之间才可以互相比较。区域传感器还单独带有参考值，作为 `eto` 属性，便于和天气服务公布的数值对照。",
+        "safety-off-entity": "阀门自身的时长",
+        "safety-off-entity-help": "适用于按自身时长到点自动关闭的阀门，例如 Gardena（它的“浇水时长”数值实体，未修改时为 1 分钟）：在此选择该数值实体。每次打开前，Smart Irrigation 会把该段时长加 30 秒写入其中，使阀门在整段期间保持打开，而 Home Assistant 停止时仍会自行关闭。不设置时，这类阀门会在其预设时间后关闭。",
+        "yaml_only_item": "{label}: {value}"
       },
       "no_items": "尚未定义任何区域。",
       "title": "区域",
@@ -801,7 +841,9 @@
         "no-valve": "未关联阀门，因此此区域不会浇水。",
         "no-valve-action": "关联阀门",
         "running": "正在浇水，剩余 {time}。",
-        "running-paused": "浇水已暂停，剩余 {time}。"
+        "running-paused": "浇水已暂停，剩余 {time}。",
+        "set-aside": "连续 {count} 次失败后已搁置：恢复前不会浇水。",
+        "put-back": "恢复"
       },
       "calendar": {
         "title": "浇水日历（12 个月，估算）",
@@ -827,11 +869,18 @@
         "zone": "区域与阀门",
         "need": "它的需求",
         "status": "当前状态"
+      },
+      "yaml": {
+        "only_help": "可视化编辑器不显示的设置。在此编辑时会保留它们。",
+        "help": "区域设置的文本形式，使用面板显示的单位。省略的可选设置会被清除；必需的设置（名称、面积等）会保留。应用之前不会保存任何内容。",
+        "not_a_zone": "这不是区域：区域是一组键（name、size、throughput 等）。",
+        "not_settings": "不是区域的设置，或不能在此设置：{keys}",
+        "applied": "区域已保存"
       }
     },
     "history": {
       "title": "历史",
-      "description": "Smart Irrigation 记到某个区域名下的每次浇水：何时开始、浇了多久、用了多少水。浇水由直接阀门控制和观测浇水记录，保留 90 天。",
+      "description": "Smart Irrigation 记到某个区域名下的每次浇水：何时开始、浇了多久、用了多少水。Smart Irrigation 浇水时以及观测浇水时都会记录，保留 90 天。",
       "refresh": "刷新",
       "no-data": "还没有记录任何浇水。",
       "table": {
@@ -840,7 +889,8 @@
         "zone": "区域",
         "duration": "时长",
         "water": "用水量",
-        "truncated": "显示 {total} 次中最近的 {count} 次。"
+        "truncated": "显示 {total} 次中最近的 {count} 次。",
+        "by_hand": "手动"
       },
       "charts": {
         "total-title": "每日总用水量（最近 30 天）",
@@ -925,7 +975,6 @@
         "no-schedules": "没有时间表。",
         "schedules-off": "其时间表保持关闭，直到你打开它们。",
         "schedules-stay-on": "你已打开其时间表：它们保持原样。",
-        "disabled": "在 Irrigation Unlimited 中已关闭，这里也一样。",
         "removed": "已不在 Irrigation Unlimited 中，已删除：{programs}。"
       },
       "supplies": {
@@ -962,7 +1011,7 @@
         },
         "nothing-waters": "导入不会浇水。Irrigation Unlimited 会继续浇水，直到你关闭它并打开这些时间表。",
         "blocked": "请先解决标为红色的问题；在此之前无法导入。",
-        "full-controller-off": "完整控制器已关闭：程序会被导入，但只有在它打开后才会浇水。",
+        "full-controller-off": "Smart Irrigation 未设为“计算并浇水”：程序已导入，但只有选择它之后才会浇水。",
         "nothing-waters-iu-off": "导入不会浇水，而且 Irrigation Unlimited 没有运行：Home Assistant 没有加载它（请查看其日志）。在你打开这些时间表之前，什么都不会浇水。"
       },
       "errors": {
@@ -986,16 +1035,16 @@
         "programs": "{count, plural, other {# 个程序}}",
         "next": "新程序的时间表处于关闭状态，所以仍由 Irrigation Unlimited 浇水。准备好后，请关闭 Irrigation Unlimited 的控制器，并在“程序”页面打开这些时间表。",
         "open-programs": "打开程序",
-        "next-off": "完整控制器已关闭，所以这些程序还不会浇水，Irrigation Unlimited 会继续浇水。请在设置中打开完整控制器，然后关闭 Irrigation Unlimited 并打开这些时间表。",
+        "next-off": "Smart Irrigation 未设为“计算并浇水”，因此这些程序尚未浇水，Irrigation Unlimited 会继续浇水。请在设置中选择“计算并浇水”，然后在此页面顶部切换。",
         "open-settings": "打开设置",
         "next-iu-off": "新程序的时间表已关闭，而且 Irrigation Unlimited 没有运行：目前什么都不会浇水。请检查这些程序，然后打开它们的时间表。",
-        "next-off-iu-off": "完整控制器已关闭，所以这些程序还不会浇水，而且 Irrigation Unlimited 没有运行：目前什么都不会浇水。请在设置中打开完整控制器，然后打开程序的时间表。"
+        "next-off-iu-off": "Smart Irrigation 未设为“计算并浇水”，因此这些程序尚未浇水，而 Irrigation Unlimited 未在运行：目前什么都不会浇水。请在设置中选择“计算并浇水”，然后打开这些程序的时间表。"
       },
       "conflicts": {
         "zone_twice": "{zone} 和 {other} 都会变为 {target}。请为其中一个选择另一个区域。",
         "calculated_needs_zone": "{zone} 目前由 Smart Irrigation 计算，数据来自某个时长调整自动化为其提供数据的区域。请选择该区域或另一个现有区域。",
-        "program_exists": "程序“{name}”（{id}）冲突：它不是由任何导入创建的。请先在浇水、程序中重命名或删除它（需打开完整控制器）。",
-        "supply_exists": "水泵“{name}”（{id}）冲突：它不是由任何导入创建的。请先在浇水、水泵和阀门中重命名或删除它（需打开完整控制器）。"
+        "program_exists": "程序“{name}”（{id}）冲突：它不是由任何导入创建的。请先在浇水、程序中重命名或删除它（需选择“计算并浇水”）。",
+        "supply_exists": "水泵“{name}”（{id}）冲突：它不是由任何导入创建的。请先在浇水、水泵和阀门中重命名或删除它（需选择“计算并浇水”）。"
       },
       "confirm_remove": "此导入会删除之前的导入创建、而 Irrigation Unlimited 中已不存在的内容：{names}。继续吗？",
       "cutover": {
@@ -1005,7 +1054,7 @@
         "si-waters-now": "由 Smart Irrigation 浇水：导入的时间表已打开，Irrigation Unlimited 的控制器已关闭。",
         "nobody-waters": "没有任何浇水：Irrigation Unlimited 的控制器已关闭，导入的时间表也已关闭。",
         "both-on": "两者都会浇水：Irrigation Unlimited 有一个控制器处于打开状态，导入的时间表也已打开。请关闭 Irrigation Unlimited，或关闭这些时间表。",
-        "full-controller-off": "完整控制器已关闭：请先在设置中打开它，否则导入的程序不会浇水。",
+        "full-controller-off": "Smart Irrigation 未设为“计算并浇水”：请先在设置中选择它，否则导入的程序不会浇水。",
         "programs": "导入的程序",
         "schedules-on": "已打开 {on}/{count} 个时间表",
         "open-programs": "切换前，请先在“程序”页面查看它们",
@@ -1024,7 +1073,7 @@
         "confirm-back": "导入的时间表将被关闭，Irrigation Unlimited 的控制器将重新打开。Irrigation Unlimited 会再次浇水。",
         "errors": {
           "generic": "操作未成功。",
-          "full_controller_off": "请先打开完整控制器：没有它，什么都不会浇水。",
+          "full_controller_off": "请先选择“计算并浇水”：否则什么都不会浇水。",
           "not_imported": "尚未导入任何内容。",
           "iu_failed": "Irrigation Unlimited 未接受切换。此步骤已做的更改已撤销：请在上方查看由谁浇水。",
           "not_switched": "浇水尚未交给 Smart Irrigation，因此没有可切回的内容。",
@@ -1041,8 +1090,7 @@
           "uses": "使用 {uses}。"
         },
         "left-off": "保持关闭，因为 Irrigation Unlimited 中它们已关闭：{names}。",
-        "unrecorded": "保持关闭，因为导入没有记录 Irrigation Unlimited 中打开了它们的哪些时间表：{names}。请自行打开它们的时间表，或切回 Irrigation Unlimited，重新导入（这会记录它们），再次切换。",
-        "main-also-waters": "主程序也会每天按触发器为 {zones} 浇水：与 Irrigation Unlimited 并行，切换后又与导入的程序并行，这些区域会被浇水两次。如果导入的程序已覆盖全部区域，请在“程序”中关闭主程序，或将触发器设为“无”。"
+        "unrecorded": "保持关闭，因为导入没有记录 Irrigation Unlimited 中打开了它们的哪些时间表：{names}。请自行打开它们的时间表，或切回 Irrigation Unlimited，重新导入（这会记录它们），再次切换。"
       },
       "notes": {
         "blueprint_zone_gone": "有蓝图自动化从区域 {zone} 为其提供数据，但该区域已不存在：不会按已计算导入",
@@ -1059,7 +1107,7 @@
         "every_limit": "每 {every, number} 天：Smart Irrigation 最多支持 {max, number}",
         "every_not_number": "{value} 不是天数",
         "feeds_other_zone": "有自动化从区域 {from} 为其提供数据，但它被匹配到区域 {to}：其计算时长取自该区域",
-        "full_controller_off": "完整控制器已关闭：程序会被导入，但只有在它打开后才会浇水",
+        "full_controller_off": "Smart Irrigation 未设为“计算并浇水”：程序已导入，但只有选择它之后才会浇水",
         "held_to_limit": "{seconds, number} 秒被限制为 {limit, number} 秒，这是 Smart Irrigation 允许的上限",
         "lead_kept": "{time} 保持不变：按水泵的 {lead, number} 秒提前时间往前移会跨到另一天",
         "lead_time": "区域“{zone}”的提前时间为 {lead, number} 秒，Smart Irrigation 会把它加到每次固定运行上：除非把提前时间设为 0 或缩短该步骤，否则它会比在 IU 中多浇这么久",
@@ -1072,8 +1120,7 @@
         "off_in_iu_matched": "在 IU 中已关闭，并匹配到“{zone}”，该区域保持原样：程序会跳过它",
         "offset_limit": "偏移 {offset, number} 分钟：Smart Irrigation 允许 {max, number}",
         "offset_rounded": "{seconds, number} 秒的偏移被取整为 {minutes, number} 分钟：Smart Irrigation 在此处以分钟计",
-        "one_queue": "{count} 个控制器：它们的程序依次运行，因为完整控制器只有一个队列",
-        "overlap": "{count} 个区域和序列有时间表：运行重叠时，IU 会同时浇水，完整控制器则依次浇水",
+        "overlap": "{count} 个区域和序列有时间表：运行重叠时，IU 会同时浇水，Smart Irrigation 则依次浇水",
         "passes_held": "{repeats, number} 次重复被限制为 {max, number} 段",
         "period_needs_both": "{from} 至 {until} 的时段需要两个日期：该时间表全年运行",
         "program_per_duration": "{count} 个程序，每种时间表时长一个",
@@ -1099,13 +1146,14 @@
         "zone_keeps_own": "区域“{zone}”保留自己的 {kept}",
         "zone_no_valve": "区域“{zone}”没有阀门：会被创建，但在关联阀门之前不会浇水",
         "zone_schedule_duration": "区域的时间表需要时长：不导入",
-        "zone_taken": "区域 {zone} 已属于“{name}”：它会获得自己的区域"
+        "zone_taken": "区域 {zone} 已属于“{name}”：它会获得自己的区域",
+        "shared_queue": "{count} 个没有主阀的控制器：它们的程序依次运行，因为没有供水的区域共用一个队列"
       }
     },
     "skip": {
-      "title": "因天气跳过",
-      "description": "当以下任一检查成立时，浇水会被暂缓：预报中的降雨，或在开始时测得的降雨、霜冻和风。",
+      "title": "取消浇水",
       "soil-moisture": "土壤湿度按区域设置，因为每个区域都有自己的传感器。",
+      "soil-zones": "土壤湿度，在区域中设置（达到或超过即跳过）：",
       "open-zones": "打开区域"
     }
   },
@@ -1117,7 +1165,7 @@
     "active_default": "默认：日出前完成",
     "active_hint": "只有选中的触发器会启动浇水，每天一次。“默认”会让每个区域都在日出前浇完；选择“无”时，Smart Irrigation 不启动任何浇水。",
     "usage_before": "当触发器触发时，Smart Irrigation 会发出事件 ",
-    "usage_after": " ——在自动化中监听该事件以开始浇水。事件数据包含 trigger_name、trigger_type 和 offset_minutes，因此您可以针对每个触发器做出不同的响应。降水跳过和灌溉间隔天数设置仍然适用：在跳过日不会发出任何事件。",
+    "usage_after": "。在自动化中监听该事件以开始浇水。事件数据包含 trigger_name、trigger_type 和 offset_minutes，因此您可以针对每个触发器做出不同的响应。降水跳过和灌溉间隔天数设置仍然适用：在跳过日不会发出任何事件。",
     "add_trigger": "添加触发器",
     "edit_trigger": "编辑触发器",
     "delete_trigger": "删除触发器",
@@ -1162,7 +1210,7 @@
       "cancel": "取消",
       "save": "保存",
       "delete": "删除",
-      "help": "当此触发器触发时，Smart Irrigation 会发出以下事件——在自动化中使用它来开始浇水。事件数据包含此触发器的名称（以及类型/偏移量），因此您可以专门对其做出响应："
+      "help": "当此触发器触发时，Smart Irrigation 会发出以下事件。在自动化中使用它来开始浇水。事件数据包含此触发器的名称（以及类型/偏移量），因此您可以专门对其做出响应："
     },
     "offset_auto": "自动（根据区域总持续时间计算）",
     "confirm_delete": "确定要删除触发器“{name}”吗？",
@@ -1192,8 +1240,7 @@
     "multiplier": "作物系数倍数",
     "threshold": "阈值偏移量",
     "zones": "区域",
-    "zones_hint": "全部，或用逗号分隔的区域编号。",
-    "enabled": "已启用"
+    "zones_hint": "全部，或用逗号分隔的区域编号。"
   },
   "weather_skip": {
     "title": "降雨预报",
@@ -1204,6 +1251,8 @@
     "effective_rain_description": "忽略小于该时段蒸散量五分之一的阵雨：它只会打湿叶片然后蒸发。按两次计算之间的整个时段来判断。",
     "forecast_label": "计入预报降雨",
     "forecast_description": "低于阈值时，每个区域的灌溉量为其亏缺量减去未来 24 小时的预报降雨量，并按天气服务给出的概率加权：预报 4 毫米、亏缺 10 毫米时，灌溉 6 毫米。达到或超过阈值时，露天区域将跳过本次运行。温室中的区域不受影响。",
+    "forecast_no_service": "需要天气服务：预报来自天气服务。",
+    "forecast_no_service_on": "没有天气服务：没有可读取的预报，因此这不会阻止任何浇水。",
     "forecast_set_up_service": "设置天气服务"
   },
   "coordinate_config": {
@@ -1219,16 +1268,12 @@
   "days_between_irrigation": {
     "title": "灌溉间隔天数",
     "description": "配置两次灌溉事件之间必须经过的最少天数。这有助于控制浇水频率，以实现节水和植物健康管理。\n\n典型的实际使用场景：\n• 草坪养护：1-2 天间隔可防止过度浇水\n• 干旱限制：6 天以上间隔用于每周浇水\n• 深根植物：3-7 天间隔用于减少浇水频率\n• 节约用水：可根据气候和土壤条件自定义",
-    "label": "灌溉之间的最少天数"
+    "label": "灌溉之间的最少天数",
+    "own": "有自己天数的区域："
   },
   "planning": {
-    "title": "规划",
-    "description": "程序在未来三天将浇哪些水。那么远的天气无从得知：如果没有任何因素阻止，浇水就会进行。",
-    "nothing_planned": "没有计划中的程序。请为程序添加一个时间表。",
-    "nothing_to_water": "暂时无需浇水：本次运行的区域都还不够缺水。",
-    "expected": "预计时长：",
+    "now": "正在浇水",
     "expected_skipped_precipitation": "预计会被跳过：预报有雨（{mm} mm）",
-    "nothing_now": "目前没有在浇水。",
     "paused": "已暂停",
     "paused_until": "暂停到 {when}，之后浇水会自动继续。",
     "waiting": "等待轮到它",
@@ -1238,24 +1283,37 @@
     "no_valve": "未关联阀门，因此不会浇水：",
     "nothing_no_valve": "本次运行无需浇水：缺水的区域没有关联阀门：",
     "left": "剩余 {time}",
+    "pass_of": "第 {pass} 段，共 {passes} 段",
+    "soaking": "正在渗透，下一段于 {when}（第 {pass} 段，共 {passes} 段）",
+    "starting": "等待 {supply} 启动",
+    "waits_for": "等待 {program}：约 {start} 至 {end}。",
+    "after_program": "在 {program} 之后立即开始。",
+    "after_program_offset": "在 {program} 结束后 {minutes} 分钟开始。",
+    "watered_twice": "{zones} 会连续浇两次水：{program} 刚在之前浇过它们。",
     "expected_skipped_suspended": "不运行：该程序已挂起至 {when}"
+  },
+  "timeline": {
+    "title": "浇水过程",
+    "water": "浇水",
+    "fill": "管道充水",
+    "soak": "渗透",
+    "pass": "第 {n} 轮",
+    "total": "共 {time}",
+    "nothing": "目前无需浇水：此程序的区域都不需要水，或都没有阀门。"
   },
   "programs": {
     "title": "程序",
-    "description": "程序会依次浇它的各个步骤。一个步骤是一个区域，或同时浇水的多个区域，默认使用 Smart Irrigation 为它计算出的时长。多个程序绝不会同时运行：下一个会等待轮到它。",
-    "main_description": "按下方的设置依次或同时浇所有区域。它由启动触发器启动，或者在启用了一个时间表后由它自己的时间表启动。",
-    "run_options": "运行选项",
+    "description": "程序会依次浇它的各个步骤。一个步骤是一个区域，或同时浇水的多个区域，默认使用 Smart Irrigation 为它计算出的时长。区域共用一个供水或没有供水的程序永远不会同时运行：下一个会等待轮到它。拥有各自供水的程序会并行浇水。",
+    "none_yet": "还没有程序。区域要放进某个程序的步骤里才会浇水：用“新程序”添加一个。",
+    "run_options": "本次运行的选项",
     "adjust_empty": "请输入百分比或秒数来调整时长。",
     "more_options": "更多选项",
     "more_options_set": "另有规则",
-    "sequencing_title": "区域顺序和暂停",
-    "others_title": "其他程序",
     "confirm_run": "立即运行{name}吗？它的阀门会马上打开。",
     "run_started": "{name}已启动。",
     "run_queued": "{name}正在排队：当前浇水结束后就会启动。",
     "run_nothing": "{name}没有找到需要浇水的地方。",
     "run_failed": "{name}无法启动：{error}",
-    "main_schedules_hint": "没有启用的时间表时，由本页下方设定的启动触发器启动主程序。只要启用了一个时间表，时间表就会取代该触发器。它的设置会保留，如果你停用或删除这些时间表，它就会恢复。",
     "name": "名称",
     "step": "步骤",
     "step_zones": "区域",
@@ -1268,23 +1326,37 @@
     "seconds": "浇水秒数",
     "passes": "分多段浇水",
     "step_delay": "此步骤之后的等待",
-    "step_delay_help": "留空：使用程序的等待时间。负值：下一步骤在本步骤结束前这么久开始。",
-    "delay": "步骤之间的等待",
-    "delay_help": "每个步骤之后等待的秒数，用于管道压力或反应慢的阀门。负值：每个步骤在上一步骤结束前这么久开始（两者重叠）。",
+    "step_delay_help": "负值：下一步骤在本步骤结束前这么久开始。",
     "tours": "轮数",
     "tours_help": "整个步骤列表浇这么多轮，每轮分到各自的水量。与重复同一步骤后再继续的分段不同，一轮让每个区域在其他区域浇水时渗透。",
     "enabled": "已启用",
     "add_step": "添加步骤",
     "delete_step": "删除步骤",
-    "add": "添加程序",
+    "add": "新程序",
+    "all_zones_button_title": "“浇灌所有区域”按钮的设置",
+    "all_zones_now_help": "仅用于“浇灌所有区域”按钮：每个有阀门的区域，按此顺序，使用这些分段和间隔。各程序保留自己的步骤。",
     "delete": "删除程序",
     "schedule": "时间表",
     "add_schedule": "添加时间表",
     "delete_schedule": "删除时间表",
-    "schedule_moment": "在",
+    "schedule_moment": "何时",
     "moment_time": "一天中的某个时间",
     "moment_sunrise": "日出",
     "moment_sunset": "日落",
+    "moment_azimuth": "太阳到达某个方位角",
+    "moment_after": "在某个程序之后",
+    "schedule_after_program": "程序",
+    "schedule_after_program_help": "当该程序真正浇过水并结束时开始，无论是按时间表还是手动运行：若它因天气被跳过、被暂停、无需浇水或被停止，则不会开始。此时间表的日期和天气条件仍然适用。",
+    "after_missing_short": "未找到程序",
+    "after_missing": "此时间表等待的程序已不存在：请另选一个，否则它永远不会开始。",
+    "schedule_after_offset": "其结束后的分钟数",
+    "schedule_after_offset_help": "0：立即开始。之后它像任何运行一样在其供水上排队。重启时仍在等待的启动会被保留，延迟超过两小时则放弃。",
+    "schedule_anchor_after_help": "在程序之后总是“开始”：无法以尚未发生的运行的结束为目标。",
+    "after_would_loop": "会形成循环",
+    "summary_after": "在 {program} 之后",
+    "delete_blocked_after": "{programs} 在此程序之后开始：删除前请先修改该时间表。",
+    "yaml_chain_loop": "这些程序会相互循环启动：{programs}",
+    "yaml_unknown_after": "没有此名称或 id 的程序：{programs}",
     "schedule_time": "时间",
     "schedule_offset": "日出日落之前 (-) 或之后 (+)",
     "schedule_anchor": "该时刻是程序",
@@ -1295,16 +1367,15 @@
     "schedule_weekdays_help": "都不勾选：每天。",
     "schedule_every": "每隔",
     "schedule_days": "天",
+    "days_count": "{count, plural, other {# 天}}",
     "schedule_every_offset": "偏移",
     "schedule_every_help": "每 3 天、偏移 0、1 或 2，可让三个程序轮流进行，三天一次，绝不在同一天。",
     "schedule_parity": "每月的日期",
-    "parity_any": "全部",
     "parity_even": "偶数日",
     "parity_odd": "奇数日",
     "schedule_days_of_month": "每月的特定日期",
     "schedule_days_of_month_help": "用逗号分隔的日期数字，以及表示当月最后一天的“最后”（例如 1, 15, 最后）。当月天数不足时会跳过该日。留空：任意日期。它会与其他筛选条件叠加。",
     "schedule_fallback_time": "没有日出或日落时",
-    "schedule_fallback_time_help": "用于没有日出或日落的日子（极昼或极夜）。",
     "schedule_months": "月份",
     "schedule_months_help": "都不勾选：每个月。",
     "schedule_from": "从",
@@ -1313,8 +1384,6 @@
     "schedule_weather": "考虑天气",
     "schedule_hard_deadline": "在结束时间中断浇水",
     "schedule_hard_deadline_help": "浇水会在结束目标时间被中断：已打开的区域会被关闭并按已浇的量计入，尚未开始的则被跳过。",
-    "schedule_conditions": "哪些条件",
-    "schedule_conditions_help": "可能阻止此计划浇水的条件。降雨、霜冻和风在“天气 > 因天气跳过”中设置，距上次浇水的天数在“设置 > 常规”中设置，土壤湿度在各个区域中设置。此计划默认全部遵守；取消勾选它应忽略的条件，例如温室可忽略降雨。你要求的推迟（24 小时、48 小时）始终有效。",
     "condition_postponed": "推迟的日期（始终启用）",
     "condition_rain_sensor": "雨量传感器",
     "condition_freeze": "霜冻",
@@ -1322,7 +1391,9 @@
     "condition_precipitation": "降雨预报",
     "condition_days_between": "距上次浇水的天数",
     "condition_soil_moisture": "土壤湿度",
-    "schedule_weather_help": "降雨、霜冻、风、潮湿的土壤以及你推迟的日期都可能阻止或缩短浇水。对不在意这些的温室滴灌线，可以关闭它。",
+    "conditions_subset": "仅这些天气检查",
+    "conditions_pick": "取消勾选此计划应忽略的检查，例如温室可忽略降雨。推迟的日子始终有效。",
+    "schedule_weather_help": "开启时，“天气 > 取消浇水”中的检查可以阻止或缩短浇水：雨、霜冻、风、两次浇水之间的天数、潮湿的土壤以及推迟的日期。对不受天气影响的温室滴灌请关闭。",
     "pause": "暂停",
     "resume": "继续",
     "next_step": "下一步骤",
@@ -1332,17 +1403,17 @@
     "confirm_delete_step": "删除此步骤吗？",
     "confirm_delete_schedule": "删除此时间表吗？",
     "deleted_zone": "（已删除的区域）",
-    "controls_help": "用于正在进行的浇水。暂停会关闭阀门并保持一切不动；其余部分在继续后浇完。“下一步骤”会结束程序当前所在的区域。“停止”会结束一切。",
     "max_litres": "水量上限",
     "max_litres_help": "此步骤中的区域在其水表累计到该水量后停止，单位为升或加仑，与面板显示水量的单位一致。0：无上限。水表只是隔一段时间上报一次，所以水量并不精确。没有水表的区域会忽略它。",
     "new_program": "程序",
-    "main_name": "主程序",
     "run_now": "立即运行",
     "run_seconds": "总时长",
     "run_seconds_help": "可选。留空：使用计划的时长。否则整个程序持续这么久，并按各步骤计划时长的比例分配给它们。",
     "run_replace": "替换正在运行的内容",
     "run_replace_help": "关：程序排在正在浇水的内容之后等待轮到它。开：先干净地停止正在浇水的内容。",
     "stop_program": "停止此程序",
+    "state_running": "运行中",
+    "state_waiting": "等待轮到它",
     "confirm_stop_program": "停止程序“{name}”吗？它已打开的区域会被关闭，若它在等待则会退出队列。",
     "min_seconds": "最小水量",
     "max_seconds": "最大水量",
@@ -1350,20 +1421,16 @@
     "step_bounds_help": "应用顺序：先应用程序“调整时长”中的百分比（如有生效；它在程序上设置，而不是在这里），再增加或减少的时间，然后是最小值和最大值。最小值或最大值为 0：不设。不需要水的步骤保持为零：最小值不会启动它。",
     "min_deficit_mm": "仅当亏缺至少为以下值时才浇水",
     "min_deficit_mm_help": "单位为毫米，0 表示始终浇水。设置后，此步骤将以它代替区域自身的阈值。固定时长的步骤始终浇水。",
+    "min_deficit_short": "最小亏缺",
     "adjust_title": "调整时长",
     "adjust_none": "当前没有生效的调整。",
-    "adjust_active": "生效中：每个步骤 {percent} % 和 {seconds} 秒，直到 {until}。",
-    "adjust_until_reset": "重置",
     "adjust_percent": "百分比",
     "adjust_hours": "有效时长",
     "adjust_help": "让此程序在设置之后开始的浇水中浇得更久或更短。它会取代之前的调整。小时留空：直到重置。",
     "adjust_apply": "应用",
     "adjust_reset": "重置",
     "confirm_reset_adjustment": "移除此程序的调整吗？",
-    "main_settings": "主程序：启动与顺序",
-    "main_settings_description": "主程序如何浇水：区域依次或同时、两个区域之间的暂停，以及 cycle and soak。它的启动触发器在下方。",
-    "main_schedules_active": "目前由主程序的时间表启动浇水：下方的启动触发器暂不使用。你仍可编辑它，如果你停用或删除这些时间表，它就会恢复。",
-    "mode_off": "完整控制器已关闭。请在设置、常规中打开它。",
+    "mode_off": "没有程序在浇水：Smart Irrigation 未设为“计算并浇水”。请在设置、常规的“Smart Irrigation 做什么”中选择它。",
     "no_zone": "无区域",
     "mode_calculated_short": "已计算",
     "every_day": "每天",
@@ -1375,33 +1442,71 @@
     "schedules_none": "没有时间表",
     "schedules_one": "1 个时间表",
     "schedules_many": "{n} 个时间表",
-    "off": "关",
+    "no_schedule_on": "没有启用的时间表",
     "steps_title": "步骤",
     "schedules_title": "时间表",
-    "passes_help": "此步骤的 cycle and soak：水量分成这么多段，每个区域在两段之间按主程序设置中的时间渗透。1：一次浇完。",
-    "schedule_fallback_skip": "跳过那天",
+    "passes_help": "此步骤的 cycle and soak：水量分成这么多段，每个区域在两段之间渗透。1：一次浇完。",
     "schedule_fallback_previous": "使用最近一次看到的时间",
-    "schedule_fallback_at": "在固定时间开始",
-    "main_steps_hint": "主程序会给每个区域浇水。若只想给其中一些区域浇水，或按你自己的顺序，请在下方“其他程序”中添加一个。",
     "summary_start_sunrise": "日出时开始",
     "summary_start_sunset": "日落时开始",
+    "summary_start_azimuth": "太阳位于 {deg}° 时开始",
     "summary_end_sunrise": "日出前完成",
     "summary_end_sunset": "日落前完成",
+    "summary_end_azimuth": "太阳位于 {deg}° 时完成",
     "last_word": "最后",
-    "conditions_none": "没有启用任何条件：降雨、霜冻和风在“天气 > 因天气跳过”中设置，距上次浇水的天数在“设置 > 常规”中设置。",
-    "cond_postponed": "首页的推迟按钮",
-    "cond_off": "已关闭",
-    "cond_freeze": "{value} 或以下",
-    "cond_wind": "{value} 起",
-    "cond_precipitation": "预报 {value} 起",
-    "cond_days_between": "至少 {n} 天",
-    "cond_soil": "{n} 个区域有传感器",
-    "cond_soil_one": "{n} 个区域有传感器",
+    "adjust_per_step": "每个步骤 {time}",
+    "adjust_short": "{what}，直到 {when}",
+    "adjust_short_open": "{what}，直到重置",
+    "adjust_in_force": "生效中：{what}。",
+    "adjust_set": "设置调整",
+    "adjust_change": "更改调整",
+    "passes_short": "{n} 段",
+    "overlap_short": "提前 {time} 开始下一个",
+    "wait_short": "下一个之前等待 {time}",
+    "soak_shared_help": "所有分段浇水的步骤共用一个渗透时间，适用于每个程序。",
+    "min_over_max": "最小值高于最大值：以最大值为准，{max}。",
     "confirm_run_replace": "现在运行 {name}？先停止正在进行的浇水，然后打开其阀门。",
     "run_replacing": "正在停止当前浇水；{name} 随后立即开始。",
     "suspended_until": "已挂起至 {when}：其计划不会启动它。",
     "suspended": "已挂起",
-    "lift_suspension": "解除"
+    "lift_suspension": "解除",
+    "preview_title": "下一次浇水会做什么",
+    "preview_help": "每个区域一行，显示 Smart Irrigation 现在会浇的时长。时长随天气变化，因此实际开始时可能不同。",
+    "yaml_back": "返回编辑器",
+    "yaml_edit": "以 YAML 编辑",
+    "yaml_only_title": "在 YAML 中设置（此处不可编辑）",
+    "hidden_title": "在高级模式或 YAML 中显示",
+    "hidden_help": "此表单在高级模式（{where}）或 YAML 中显示的设置。在此编辑时会保留它们。",
+    "yaml_only_help": "可视化编辑器不显示的设置。在此编辑时会保留它们。",
+    "yaml_help": "以文本表示的程序。步骤可用名称或编号指定区域，省略的项使用默认值。应用之前不会保存任何内容：下方的时间线显示程序会做什么。",
+    "yaml_apply": "应用",
+    "yaml_invalid": "这不是有效的 YAML。",
+    "yaml_not_a_program": "这不是程序：程序是一组键（name、steps、schedules）。",
+    "yaml_unknown_zones": "未找到区域，或两个区域同名，已忽略：{zones}",
+    "yaml_not_watered": "未纳入浇水（无阀门或已停用）：{zones}",
+    "yaml_applied": "程序已保存",
+    "notify_title": "通知",
+    "notify_help": "在此程序浇水后通知某人：手机、通知实体或 Home Assistant 中的通知。未勾选任何目标时不会发送。阀门未关闭或水泵无响应时会立即通知。",
+    "notify_persistent": "Home Assistant 中的通知",
+    "notify_when": "何时通知",
+    "notify_when_start_and_finish": "每次浇水开始和结束时",
+    "notify_when_finish": "每次浇水结束时",
+    "notify_when_problems": "仅在出问题时",
+    "notify_none": "Home Assistant 还没有通知目标：请添加移动应用或通知集成。",
+    "schedule_azimuth": "太阳方位角",
+    "schedule_azimuth_help": "从正北顺时针计的度数：90 为东，180 为南，270 为西。适用于墙或树的阴影在那一刻离开的花圃。",
+    "view_flow": "示意图",
+    "view_timeline": "时间轴",
+    "yaml_only_item": "{label}: {value}",
+    "parity_any": "全部",
+    "cond_days_between": "至少 {n} 天",
+    "cond_freeze": "{value} 或以下",
+    "cond_off": "已关闭",
+    "cond_postponed": "首页的推迟按钮",
+    "cond_precipitation": "预报 {value} 起",
+    "cond_soil": "{n} 个区域有传感器",
+    "cond_soil_one": "{n} 个区域有传感器",
+    "cond_wind": "{value} 起"
   },
   "supplies": {
     "title": "水泵和总阀",
@@ -1413,7 +1518,6 @@
     "delay_before_help": "正值：水泵或总阀在区域阀门打开前这么久开启。负值：先打开区域阀门，水泵或总阀在这么久之后开启。",
     "delay_after": "之后的延迟",
     "delay_after_help": "正值：区域阀门关闭后，水泵或总阀再保持开启这么久。负值：它在区域阀门关闭前这么久关闭，这样水泵就不会顶着关闭的阀门工作。",
-    "enabled": "已启用",
     "add": "添加水泵或总阀",
     "delete": "删除",
     "confirm_delete": "删除“{name}”吗？使用它的区域将不再有水泵或总阀。",
@@ -1424,18 +1528,13 @@
     "title": "实测浇水（闭环）",
     "description": "根据实际灌溉自动为各区域的水量平衡计入水量，而非通过自动化重置水量平衡。启用后，请在“区域”选项卡中为每个区域选择一个阀门/开关实体：当其开启时，会根据运行时间和该区域的流量为水量平衡计入水量。若需精确核算，也可为每个区域选择一个累计水量计（类似水表的累计总量），届时将改用实测水量。重要提示：启用此功能后，它将成为唯一为水量平衡计水的来源，因此请从你的灌溉自动化中移除所有 set_bucket 和 reset_bucket 调用，以免重复计量。",
     "enabled_label": "启用实测浇水",
-    "direct_control_label": "让 Smart Irrigation 控制阀门",
-    "direct_control_description": "启用后，Smart Irrigation 会打开每个区域关联的阀门，等待计算出的时长，然后将其关闭，无需自动化。进行中的运行会在重启后恢复。安全提示：能够自行关闭的阀门在打开时会收到本次运行的时长（ZHA 上的 Sonoff SWV，或其区域设置了 MQTT 安全主题的阀门），因此即使 Home Assistant 宕机，它也会关闭。其他阀门会一直浇水，直到 Home Assistant 恢复：请为它们设置硬件故障保护（最大运行时长）。",
-    "full_controller_label": "完整控制器：由 Smart Irrigation 负责我所有的浇水",
-    "full_controller_title": "完整控制器",
-    "confirm_full_controller": "要开启完整控制器吗？Smart Irrigation 将控制阀门并自行启动浇水。启动时发现处于打开状态、且不属于我们任何一次运行的阀门会被关闭。",
-    "full_controller_description": "开启阀门控制，并添加“浇水”标签页：程序、规划和水泵。启动触发器、顺序、区域之间的暂停以及 cycle and soak 会作为主程序的设置移到那里，在你添加其他程序之前仍照常工作。关闭它会完全恢复之前的行为。启动时发现处于打开状态、且不属于我们任何一次运行的阀门会被关闭。",
+    "confirm_full_controller": "计算并浇水？Smart Irrigation 将自行打开阀门，并按其程序启动浇水。启动时发现处于打开状态、且不属于我们任何一次运行的阀门会被关闭。",
     "sequencing_label": "区域排序",
     "sequencing": {
       "sequential": "顺序（一次一个区域）",
       "parallel": "并行（所有区域同时）"
     },
-    "sequencing_description": "你的区域是如何浇水的。这决定了启动触发器在需要于日出前结束时，是从多长时间往回推算：一个接一个是所有区域时长之和，全部同时则取其中最长的。无论阀门是由 Smart Irrigation 自己打开，还是由你自己的自动化打开，都适用。",
+    "sequencing_description": "需要在日出前结束的启动触发器会从日出往回推算：一个接一个时，按时长之和；全部同时时，按最长的。",
     "passes_label": "分多段浇水",
     "passes_description": "循环与渗透：同样的水量分成几段较短的浇灌，中间留出间歇，让黏重的土壤吸进去，而不是任它流走。一段就是一次浇完，这是默认值。太短而无法拆分的浇水不作改动。",
     "soak_label": "各段之间的渗透",
@@ -1443,7 +1542,10 @@
     "pause_between_zones_description": "顺序浇水时两个区域之间的等待：让管路压力恢复，或让动作慢的阀门先关好，再打开下一个。",
     "minutes": "分钟",
     "seconds": "秒",
-    "direct_control_locked": "完整控制器正在控制阀门：请先将它关闭才能更改此项。"
+    "set_aside_label": "失败多少次后搁置区域",
+    "set_aside_description": "阀门连续这么多次未打开、没有出水或无法设置其自带定时器时，该区域将被搁置：在恢复之前没有程序会给它浇水，而不是每天早上都失败。你会立即收到提醒（程序通知、Home Assistant 中的修复项、区域的问题传感器）。修好后手动试开阀门时，区域会自动恢复。0：从不。",
+    "leak_label": "漏水警报阈值",
+    "leak_description": "所有阀门关闭时，区域的水表计数达到这么多升即报告漏水：中枢的漏水传感器、smart_irrigation_leak 事件、修复项以及程序通知。仅适用于只计量花园的水表：家庭总水表还会计入水龙头。0：不监测。"
   },
   "calculation_log": {
     "title": "计算日志",
@@ -1459,7 +1561,6 @@
   "measured_skip": {
     "title": "按实测条件跳过",
     "description": "每次浇水开始时检查，来自传感器或天气服务。读不到的传感器绝不会阻止浇水。",
-    "enabled": "已启用",
     "threshold": "阈值",
     "sensor": "传感器",
     "sensor-optional": "传感器（可选）",
@@ -1541,24 +1642,26 @@
         "running": "运行中",
         "waiting": "等待中",
         "paused": "已暂停",
-        "suspended": "已挂起",
-        "disabled": "已禁用"
+        "suspended": "已挂起"
       },
-      "main_name": "主程序"
+      "after": "在 {name} 之后开始",
+      "next_in_line": "下一个开始"
     },
     "editor": {
       "title": "标题",
       "zones": "区域（留空则为全部）",
       "show_next_start": "显示下次启动",
       "compact": "仅显示需要浇水的区域",
-      "show_programs": "显示程序（完整控制器）"
+      "show_programs": "显示程序"
     },
     "no_valve": "未关联阀门，不浇水",
     "no_trigger": "没有启动触发器",
     "not_scheduled": "该浇水了，但未安排",
     "off": "已关闭",
     "watering_left": "正在浇水，剩余 {time}",
-    "paused_left": "已暂停，剩余 {time}"
+    "paused_left": "已暂停，剩余 {time}",
+    "soaking": "正在渗透，下一段于 {when}（{pass}/{passes}）",
+    "pass_of": "第 {pass}/{passes} 段"
   },
   "confirm": {
     "delete_zone": "删除区域“{name}”？它的设置和水量平衡将会丢失。",
@@ -1567,5 +1670,65 @@
     "reset_bucket": "将“{name}”的水量平衡归零？",
     "reset_all_buckets": "将所有区域的水量平衡归零？",
     "clear_all_weather": "清除所有已收集的天气数据？下一次计算只会使用之后的读数。"
+  },
+  "notify": {
+    "title_done": "{program}：浇水完成",
+    "title_problem": "{program}：出现问题",
+    "title_started": "{program}：开始浇水",
+    "zone_line": "{zone}：{minutes} 分钟",
+    "zone_volume": "，{litres} 升",
+    "problem_line": "{zone}：{reason}",
+    "nothing": "没有区域需要浇水。",
+    "stopped": "在结束前已停止。",
+    "cut": "为在截止时间前完成而缩短。",
+    "reasons": {
+      "valve_did_not_open": "阀门没有打开",
+      "valve_did_not_close": "阀门没有关闭",
+      "no_flow": "阀门已打开但没有水流",
+      "valve_timer_not_set": "无法设置阀门自带的定时器，阀门保持关闭",
+      "supply_did_not_turn_on": "水泵或总阀没有启动",
+      "supply_did_not_turn_off": "水泵或总阀没有停止",
+      "zone_set_aside": "多次失败后已搁置：恢复前不会浇水"
+    },
+    "title_leak": "所有阀门关闭时仍有水流",
+    "leak_line": "阀门关闭时计量了 {litres} 升（{zones}）。请检查是否漏水或阀门未关。"
+  },
+  "week": {
+    "title": "接下来几天",
+    "help": "每次浇水是一个色块，颜色对应其程序；斜线为渗透暂停；淡色为可能因天气取消的浇水。悬停色块查看区域，点击打开程序。未来几天取决于天气预报。",
+    "days": "{n} 天",
+    "today": "今天",
+    "tomorrow": "明天",
+    "held": "天气可能使其取消",
+    "nothing": "无需浇水",
+    "done": "已完成",
+    "running": "进行中",
+    "empty": "没有计划的程序。"
+  },
+  "flow": {
+    "start": "开始",
+    "by_hand": "手动启动",
+    "weather": "天气允许？",
+    "weather_sub": "雨、霜、风…",
+    "weather_yes": "是",
+    "weather_yes_unread": "是，但无法读取{reason}",
+    "weather_no": "否：{reason}",
+    "otherwise": "否则：当天不浇",
+    "supply_on": "{name} 开启",
+    "supply_before": "阀门前 {time}",
+    "supply_after_valves": "阀门后 {time}",
+    "supply_off": "{name} 关闭",
+    "supply_after": "之后 {time}",
+    "step": "步骤 {n}",
+    "together": "同时",
+    "passes": "{n} 轮",
+    "soak": "每轮之间渗透 {time}",
+    "wait": "等待 {time}",
+    "overlap": "重叠 {time}",
+    "tours": "全部重来，{n} 遍",
+    "notify": "通知",
+    "empty": "目前无需浇水。",
+    "idle": "目前无需浇水",
+    "no_water": "暂无"
   }
 }

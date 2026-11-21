@@ -291,9 +291,25 @@ def test_normalisation_keeps_a_negative_delay_within_bounds():
             )
         ]
     )
-    assert program["delay"] == -MAX_OVERLAP_SECONDS
+    # The program's delay, bounded, goes to the step that had none.
+    assert program["delay"] == 0.0
     delays = [s["delay"] for s in program["steps"]]
-    assert delays == [-30.0, -float(MAX_OVERLAP_SECONDS), 6 * 3600.0, None]
+    assert delays == [
+        -30.0,
+        -float(MAX_OVERLAP_SECONDS),
+        6 * 3600.0,
+        -float(MAX_OVERLAP_SECONDS),
+    ]
+
+
+def test_a_programs_delay_goes_to_its_steps_and_plans_the_same_run():
+    raw = _program(
+        delay=120,
+        steps=[{"zones": [0]}, {"zones": [1], "delay": 0}, {"zones": [2]}],
+    )
+    [program] = normalize_programs([raw])
+    assert program["delay"] == 0.0
+    assert [s["delay"] for s in program["steps"]] == [120.0, 0.0, 120.0]
 
 
 def test_overlap_seconds():
@@ -313,3 +329,18 @@ def test_the_plan_length_counts_the_overlap():
     assert plan_wall_seconds(plan_program(program, zones)) == 300
     [program] = normalize_programs([_program(delay=20)])
     assert plan_wall_seconds(plan_program(program, zones)) == 620
+
+
+async def test_the_overlap_counts_from_the_valves_opening(monkeypatch):
+    """Q17: behind a pump with a 5 s lead, 30 s asked overlapped by 35."""
+    _, coord, clock, timeline = _setup(monkeypatch, [_program(delay=-60)], pump=True)
+    coord.store.config.supplies[0][const.SUPPLY_DELAY_BEFORE] = 5
+
+    await _run(coord, clock)
+    await asyncio.gather(*list(coord.hass.created), return_exceptions=True)
+
+    assert _at(timeline, "pump on") == [0.0]
+    assert _at(timeline, "zone_0 on") == [5.0]
+    assert _at(timeline, "zone_0 off") == [305.0]
+    # 60 s before zone 0 closes; the pump is on already, zone 1 opens at once.
+    assert _at(timeline, "zone_1 on") == [245.0]

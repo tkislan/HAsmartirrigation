@@ -11,10 +11,11 @@ balance calculated unless told otherwise (``DURATION_CALCULATED``), which is
 what Irrigation Unlimited users did with two automations and its
 ``adjust_time`` service.
 
-The main program is the one the full controller creates when it is switched on,
-from the settings that already run the watering (the start trigger, the
-sequencing, the pause between zones, the passes). It carries no steps of its
-own: until the user adds a second program, nothing runs differently from before.
+Every program is equal: its steps name its zones, its schedules start it. A
+zone is watered by the programs whose steps name it, and by nothing else (the
+dry zone alert says when no program does). There used to be a "main program"
+without steps that watered every zone through a cycle of its own; it was
+converted once into an ordinary program (program_migration.py).
 """
 
 from __future__ import annotations
@@ -23,12 +24,57 @@ import math
 import re
 
 import homeassistant.util.dt as dt_util
+from homeassistant.util import slugify
 
 from . import const
-from .schedules import ANCHOR_END, normalize_schedules
+from .schedules import ANCHOR_END, after_program_of, normalize_schedules
 
+# The id and default name the old main program kept when it was converted into
+# an ordinary program: its sensor, its last runs and its notifications are
+# keyed on the id, and the panel and the sensor still translate that name.
 MAIN_PROGRAM_ID = "main"
 MAIN_PROGRAM_NAME = "Main program"
+
+# A neutral name for a program made for the user (the first one, or the old
+# main program kept under its default name), in Home Assistant's language: the
+# panel's name of its Watering tab.
+WATERING_NAMES = {
+    "cs": "Zavlažování",
+    "da": "Vanding",
+    "de": "Bewässerung",
+    "en": "Watering",
+    "es": "Riego",
+    "fi": "Kastelu",
+    "fr": "Arrosage",
+    "hu": "Öntözés",
+    "it": "Irrigazione",
+    "nl": "Bewatering",
+    "no": "Vanning",
+    "nb": "Vanning",
+    "nn": "Vanning",
+    "pl": "Podlewanie",
+    "pt-br": "Irrigação",
+    "pt": "Rega",
+    "ru": "Полив",
+    "sk": "Zavlažovanie",
+    "sl": "Zalivanje",
+    "sv": "Bevattning",
+    "uk": "Полив",
+    "zh-hans": "浇水",
+    "zh-hant": "澆水",
+    "zh": "浇水",
+}
+
+
+def watering_name(language) -> str:
+    """The neutral program name in ``language`` (``fr``, ``pt-BR``...), else English."""
+    code = str(language or "").strip().lower().replace("_", "-")
+    while code:
+        if code in WATERING_NAMES:
+            return WATERING_NAMES[code]
+        code = code.rpartition("-")[0]
+    return WATERING_NAMES["en"]
+
 
 # How a step decides how long to water.
 DURATION_CALCULATED = "calculated"  # the zone's calculated duration
@@ -53,29 +99,135 @@ MAX_DELAY_SECONDS = 6 * 3600
 # overlap_seconds).
 MAX_OVERLAP_SECONDS = 3600
 
-_ID_UNSAFE = re.compile(r"[^a-z0-9_]+")
+_ID_SAFE = re.compile(r"[a-z0-9_]+")
 
 
-def default_main_program() -> dict:
-    """The program the full controller starts with."""
+class ProgramsRefused(ValueError):
+    """A save of the programs that is refused, with the reason the panel shows."""
+
+
+class LastProgramError(ProgramsRefused):
+    """A save that would delete the last program, which is refused.
+
+    With no program at all nothing waters, silently: one is always kept.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(LAST_PROGRAM_MESSAGE)
+
+
+LAST_PROGRAM_MESSAGE = (
+    "The last program cannot be deleted: without a program nothing is watered. "
+    "Switch its schedules off instead"
+)
+
+
+class ProgramChainError(ProgramsRefused):
+    """A save that would break what starts after what, which is refused.
+
+    Either the programs would start each other in a loop (A after B after A,
+    or A after itself), or a program that another one starts after is deleted,
+    or a schedule waits for a program that does not exist.
+    """
+
+
+def _program_names(programs) -> dict:
     return {
-        const.PROGRAM_ID: MAIN_PROGRAM_ID,
-        const.PROGRAM_NAME: MAIN_PROGRAM_NAME,
-        const.PROGRAM_ENABLED: True,
-        const.PROGRAM_MAIN: True,
+        p.get(const.PROGRAM_ID): p.get(const.PROGRAM_NAME) or p.get(const.PROGRAM_ID)
+        for p in programs or []
+        if isinstance(p, dict)
     }
 
 
-def ensure_main_program(programs) -> list:
-    """The programs, with the main one first, created if it is missing.
+def program_predecessors(programs) -> dict:
+    """{program id: the ids of the programs its "after" schedules wait for}.
 
-    Never changes a program that is there: a main program the user renamed or
-    disabled stays as it was, and the others keep their order.
+    Every schedule counts, switched on or not: one switched on later must not
+    close a loop that nothing checked.
     """
-    programs = [dict(p) for p in (programs or []) if isinstance(p, dict)]
-    if any(p.get(const.PROGRAM_ID) == MAIN_PROGRAM_ID for p in programs):
-        return programs
-    return [default_main_program(), *programs]
+    found: dict = {}
+    for program in programs or []:
+        if not isinstance(program, dict):
+            continue
+        for schedule in program.get(const.PROGRAM_SCHEDULES) or []:
+            after = after_program_of(schedule)
+            if after:
+                found.setdefault(program.get(const.PROGRAM_ID), set()).add(after)
+    return found
+
+
+def chain_loop(programs) -> list | None:
+    """A loop of programs that start each other, as ids, or None.
+
+    ``[a, b, a]``: a starts after b, which starts after a. ``[a, a]``: a
+    starts after itself. Only the first loop found is given.
+    """
+    edges = program_predecessors(programs)
+    done: set = set()
+
+    def visit(node, path):
+        if node in path:
+            return path[path.index(node) :] + [node]
+        if node in done:
+            return None
+        for nxt in sorted(edges.get(node) or ()):
+            loop = visit(nxt, path + [node])
+            if loop:
+                return loop
+        done.add(node)
+        return None
+
+    for start in sorted(edges, key=str):
+        loop = visit(start, [])
+        if loop:
+            return loop
+    return None
+
+
+def dependents_of(programs, program_id) -> list:
+    """The programs one of whose schedules starts after ``program_id``, by name."""
+    return [
+        p.get(const.PROGRAM_NAME) or p.get(const.PROGRAM_ID)
+        for p in programs or []
+        if isinstance(p, dict)
+        and program_id in (program_predecessors([p]).get(p.get(const.PROGRAM_ID)) or ())
+    ]
+
+
+def check_program_chains(programs, old_programs=None) -> None:
+    """Refuse (ProgramChainError) a save that breaks what starts after what.
+
+    ``programs`` is the list as it would be stored, ``old_programs`` as it is.
+    What was already wrong in the store (a loop, or a schedule waiting for a
+    program long gone, both from before the check existed) does not stop the
+    save of something else: only what this save makes wrong is refused.
+    """
+    old_programs = [p for p in old_programs or [] if isinstance(p, dict)]
+    names = _program_names(programs)
+    old_names = _program_names(old_programs)
+    loop = chain_loop(programs)
+    if loop and chain_loop(old_programs) != loop:
+        said = " -> ".join(f'"{names.get(i, i)}"' for i in loop)
+        raise ProgramChainError(
+            "Programs cannot start after each other in a loop: "
+            f"{said}. Change one of these schedules"
+        )
+    old_waits = program_predecessors(old_programs)
+    for program_id, waits in program_predecessors(programs).items():
+        for after in sorted(waits):
+            if after in names:
+                continue
+            if after in old_names:
+                raise ProgramChainError(
+                    f'"{old_names[after]}" cannot be deleted: '
+                    f'"{names.get(program_id, program_id)}" starts after it. '
+                    "Change that schedule first"
+                )
+            if after not in (old_waits.get(program_id) or ()):
+                raise ProgramChainError(
+                    f'"{names.get(program_id, program_id)}" starts after a '
+                    f'program that does not exist ("{after}")'
+                )
 
 
 def find_program(programs, program_id) -> dict | None:
@@ -86,35 +238,96 @@ def find_program(programs, program_id) -> dict | None:
     return None
 
 
-def main_has_enabled_schedules(programs) -> bool:
-    """Whether the main program has at least one schedule that is switched on.
-
-    When it does, those schedules start the main program and the historical
-    start trigger stays unarmed. The program being disabled or suspended is a
-    different matter (it holds the schedules back, it does not hand the start
-    back to the trigger).
-    """
-    main = find_program(programs, MAIN_PROGRAM_ID)
-    if main is None:
-        return False
+def has_schedule_on(program: dict) -> bool:
+    """Whether a program has a schedule that is switched on (it starts on its own)."""
     return any(
         isinstance(s, dict) and s.get(const.SCHEDULE_ENABLED) is not False
-        for s in main.get(const.PROGRAM_SCHEDULES) or []
+        for s in (program or {}).get(const.PROGRAM_SCHEDULES) or []
     )
 
 
+def set_schedules_enabled(program: dict, enabled: bool) -> dict:
+    """The program with every one of its schedules switched on or off."""
+    return {
+        **program,
+        const.PROGRAM_SCHEDULES: [
+            {**s, const.SCHEDULE_ENABLED: bool(enabled)}
+            for s in program.get(const.PROGRAM_SCHEDULES) or []
+            if isinstance(s, dict)
+        ],
+    }
+
+
+def zone_steps(zone_ids, sequencing: str, passes, pause_seconds) -> list:
+    """Steps that water ``zone_ids`` as the old classic cycle did.
+
+    Sequential: one step per zone, in that order, each followed by the pause
+    between zones (none after the last, which has nothing to wait for).
+    Parallel: one step with every zone. Each step takes the calculated
+    duration in ``passes`` passes, with the general soak between them, which
+    is what the cycle did with the general settings.
+    """
+    zone_ids = [int(z) for z in zone_ids]
+    try:
+        passes = max(1, min(MAX_PASSES, int(passes or 1)))
+    except (TypeError, ValueError):
+        passes = 1
+    try:
+        pause = max(0.0, min(float(MAX_DELAY_SECONDS), float(pause_seconds or 0.0)))
+    except (TypeError, ValueError):
+        pause = 0.0
+    if not zone_ids:
+        return []
+
+    def step(number: int, zones: list, delay) -> dict:
+        return {
+            const.STEP_ID: f"step_{number}",
+            const.STEP_ZONES: zones,
+            const.STEP_MODE: DURATION_CALCULATED,
+            const.STEP_PASSES: passes,
+            const.STEP_DELAY: delay,
+        }
+
+    if sequencing == const.CONF_ZONE_SEQUENCING_PARALLEL:
+        return [step(1, zone_ids, None)]
+    last = len(zone_ids) - 1
+    return [
+        step(n + 1, [zone_id], pause if pause and n < last else None)
+        for n, zone_id in enumerate(zone_ids)
+    ]
+
+
+def zones_with_valve(zones, include_disabled: bool = False) -> list:
+    """The ids of the zones with a linked valve, in their stored order.
+
+    ``include_disabled`` keeps a disabled zone that has a valve: it is not
+    watered while it is disabled (the plan leaves it out), and is again once
+    it is enabled, as the old classic cycle did.
+    """
+    ids = []
+    for zone in zones or []:
+        if not isinstance(zone, dict) or const.ZONE_ID not in zone:
+            continue
+        if not zone.get(const.ZONE_LINKED_ENTITY):
+            continue
+        if (
+            not include_disabled
+            and zone.get(const.ZONE_STATE) == const.ZONE_STATE_DISABLED
+        ):
+            continue
+        ids.append(int(zone[const.ZONE_ID]))
+    return ids
+
+
 def needs_run_length(programs) -> bool:
-    """Whether a program other than the main one has a "done by" schedule.
+    """Whether a program has a "done by" schedule.
 
     Only such a schedule is placed from the length of its run, so only then
     are the planned durations worth working out for the programs' starts: the
-    live estimate behind them is slow. The main program's length has its own
-    path (``_planned_run_seconds``).
+    live estimate behind them is slow.
     """
     return any(
         isinstance(p, dict)
-        and not p.get(const.PROGRAM_MAIN)
-        and p.get(const.PROGRAM_ENABLED) is not False
         and any(
             isinstance(s, dict)
             and s.get(const.SCHEDULE_ENABLED) is not False
@@ -144,8 +357,21 @@ def _count(value, default: int, high: int) -> int:
 
 def unique_id(wanted, fallback: str, used: set) -> str:
     """``wanted`` as an id (lower case, letters, digits and ``_``), made unique
-    against ``used`` with a number; ``fallback`` when nothing is left of it."""
-    base = _ID_UNSAFE.sub("_", str(wanted or fallback).strip().lower()).strip("_")
+    against ``used`` with a number; ``fallback`` when nothing is left of it.
+
+    A name is transliterated ("Démo potager" is ``demo_potager``, not
+    ``d_mo_potager``). Something that is an id already is kept exactly as it
+    is, since stored ids are passed through here on every save and must never
+    change (an old ``d_mo_potager`` stays, ``a__b`` keeps its two ``_``).
+    """
+    text = str(wanted or fallback).strip()
+    if _ID_SAFE.fullmatch(text):
+        base = text.strip("_")
+    else:
+        base = slugify(text.lower())
+        if base == "unknown" and text.lower() != "unknown":
+            # What slugify answers when nothing is left of the text.
+            base = ""
     base = base or fallback
     unique, n = base, 2
     while unique in used:
@@ -215,56 +441,74 @@ def normalize_step(step, used: set, position: int = 0) -> dict | None:
     return normalized
 
 
-def normalize_programs(programs, reserved_schedule_ids=None) -> list:
-    """The programs as they are stored: well formed, ids unique, main kept.
+# A notify entity or action, or a persistent notification.
+NOTIFY_TARGET_PATTERN = re.compile(r"notify\.[a-z0-9_]+|persistent_notification")
 
-    What the panel sends is cleaned rather than refused. The main program keeps
-    its id and carries no steps; any other program gets one if it has none. The
-    id ``main`` belongs to the main program alone: a program named "Main" that
-    comes without an id gets another one, and the real main is never displaced.
+
+def normalize_notify(raw) -> dict | None:
+    """A program's notification settings as stored, or None for none.
+
+    Targets are notify entity ids, ``notify.<action>`` names (the phone apps)
+    or ``persistent_notification``; anything else is dropped. Without a target
+    nothing is stored, so a program that does not notify stays as it was.
+    """
+    if not isinstance(raw, dict):
+        return None
+    targets: list[str] = []
+    for target in raw.get(const.NOTIFY_TARGETS) or []:
+        if not isinstance(target, str):
+            continue
+        target = target.strip()
+        if NOTIFY_TARGET_PATTERN.fullmatch(target) and target not in targets:
+            targets.append(target)
+    if not targets:
+        return None
+    when = raw.get(const.NOTIFY_WHEN)
+    return {
+        const.NOTIFY_TARGETS: targets,
+        const.NOTIFY_WHEN: (
+            when if when in const.NOTIFY_WHEN_CHOICES else const.NOTIFY_WHEN_FINISH
+        ),
+        const.NOTIFY_START: raw.get(const.NOTIFY_START) is True,
+    }
+
+
+def normalize_programs(programs, reserved_schedule_ids=None) -> list:
+    """The programs as they are stored: well formed, ids unique.
+
+    What the panel sends is cleaned rather than refused, and every program is
+    cleaned the same way. A program starts on its own through its schedules
+    alone: there is no program-level on/off.
 
     ``reserved_schedule_ids`` maps a program id to the schedule ids it has had
     (stored, or with a mark of its last run): a new schedule is never given one
     of them, so it cannot inherit what was recorded for a schedule long gone.
     """
     cleaned = []
-    used = {MAIN_PROGRAM_ID}
-    main_seen = False
     reserved_schedule_ids = reserved_schedule_ids or {}
-    for position, program in enumerate(programs or []):
+    programs = list(programs or [])
+    # The ids a program comes with are given first, and a program that comes
+    # without one is named after them: a new "Main" placed before the old main
+    # program must not take its id, and with it its sensor and its marks.
+    used: set = set()
+    ids: dict = {}
+    for position, program in enumerate(programs):
+        if isinstance(program, dict) and program.get(const.PROGRAM_ID):
+            ids[position] = unique_id(
+                program.get(const.PROGRAM_ID), f"program_{position + 1}", used
+            )
+    for position, program in enumerate(programs):
+        if isinstance(program, dict) and position not in ids:
+            ids[position] = unique_id(
+                str(program.get(const.PROGRAM_NAME) or "").strip(),
+                f"program_{position + 1}",
+                used,
+            )
+    for position, program in enumerate(programs):
         if not isinstance(program, dict):
             continue
-        is_main = (
-            program.get(const.PROGRAM_ID) == MAIN_PROGRAM_ID
-            or program.get(const.PROGRAM_MAIN) is True
-        )
         name = str(program.get(const.PROGRAM_NAME) or "").strip()
-        if is_main:
-            if main_seen:
-                continue
-            main_seen = True
-            main = {
-                const.PROGRAM_ID: MAIN_PROGRAM_ID,
-                const.PROGRAM_NAME: name or MAIN_PROGRAM_NAME,
-                const.PROGRAM_ENABLED: program.get(const.PROGRAM_ENABLED) is not False,
-                const.PROGRAM_MAIN: True,
-            }
-            # Optional schedules of its own, stored only when there are some, so
-            # that a main program without any stays exactly as it was.
-            schedules = normalize_schedules(
-                program.get(const.PROGRAM_SCHEDULES),
-                reserved_schedule_ids.get(MAIN_PROGRAM_ID),
-            )
-            for schedule in schedules:
-                # The classic cycle has no deadline to cut it at.
-                schedule.pop(const.SCHEDULE_HARD_DEADLINE, None)
-            if schedules:
-                main[const.PROGRAM_SCHEDULES] = schedules
-            cleaned.append(main)
-            continue
-        program_id = unique_id(
-            program.get(const.PROGRAM_ID) or name, f"program_{position + 1}", used
-        )
+        program_id = ids[position]
         step_ids: set = set()
         steps = [
             s
@@ -274,30 +518,45 @@ def normalize_programs(programs, reserved_schedule_ids=None) -> list:
             )
             if s is not None
         ]
-        cleaned.append(
-            {
-                const.PROGRAM_ID: program_id,
-                const.PROGRAM_NAME: name or f"Program {position + 1}",
-                const.PROGRAM_ENABLED: program.get(const.PROGRAM_ENABLED) is not False,
-                const.PROGRAM_MAIN: False,
-                const.PROGRAM_STEPS: steps,
-                const.PROGRAM_DELAY: _number(
-                    program.get(const.PROGRAM_DELAY),
-                    0.0,
-                    -float(MAX_OVERLAP_SECONDS),
-                    float(MAX_DELAY_SECONDS),
-                ),
-                const.PROGRAM_TOURS: _count(
-                    program.get(const.PROGRAM_TOURS), 1, MAX_TOURS
-                ),
-                const.PROGRAM_SCHEDULES: normalize_schedules(
-                    program.get(const.PROGRAM_SCHEDULES),
-                    reserved_schedule_ids.get(program_id),
-                ),
-            }
+        delay = _number(
+            program.get(const.PROGRAM_DELAY),
+            0.0,
+            -float(MAX_OVERLAP_SECONDS),
+            float(MAX_DELAY_SECONDS),
         )
-    # The main program, when there is one, always comes first.
-    cleaned.sort(key=lambda p: 0 if p.get(const.PROGRAM_MAIN) else 1)
+        if delay:
+            # The wait between steps is a step's own (one setting rather than a
+            # program's default and a step's override): a delay given for the
+            # program goes to each step without one, which plans the same run.
+            steps = [
+                (
+                    {**step, const.STEP_DELAY: delay}
+                    if step.get(const.STEP_DELAY) is None
+                    else step
+                )
+                for step in steps
+            ]
+        schedules = normalize_schedules(
+            program.get(const.PROGRAM_SCHEDULES),
+            reserved_schedule_ids.get(program_id),
+        )
+        if program.get(const.PROGRAM_ENABLED) is False:
+            # A program switched off by the old "Program on" started on its
+            # own no more: its schedules switched off say the same, and it can
+            # still be run by hand. deprecated: remove in 2027.11
+            schedules = [{**s, const.SCHEDULE_ENABLED: False} for s in schedules]
+        cleaned_program = {
+            const.PROGRAM_ID: program_id,
+            const.PROGRAM_NAME: name or f"Program {position + 1}",
+            const.PROGRAM_STEPS: steps,
+            const.PROGRAM_DELAY: 0.0,
+            const.PROGRAM_TOURS: _count(program.get(const.PROGRAM_TOURS), 1, MAX_TOURS),
+            const.PROGRAM_SCHEDULES: schedules,
+        }
+        notify = normalize_notify(program.get(const.PROGRAM_NOTIFY))
+        if notify:
+            cleaned_program[const.PROGRAM_NOTIFY] = notify
+        cleaned.append(cleaned_program)
     return cleaned
 
 
@@ -505,15 +764,39 @@ def plan_program(program: dict, zones, adjustment: dict | None = None) -> list:
     return plan
 
 
+def pass_count(passes, water: float) -> int:
+    """How many passes ``water`` seconds are actually watered in.
+
+    The runner (valve_runner.split_into_passes) brings the number down until
+    each pass is worth opening a valve for: six passes asked of a four-minute
+    run water in four.
+    """
+    try:
+        passes = int(passes or 1)
+    except (TypeError, ValueError):
+        passes = 1
+    passes = max(1, min(passes, const.CONF_MAX_WATERING_PASSES))
+    while passes > 1 and water / passes < const.MIN_PASS_SECONDS:
+        passes -= 1
+    return passes
+
+
+def _member_passes(member: dict) -> tuple:
+    """``(passes, lead, water)`` of a zone of a step, as the runner waters it."""
+    seconds = max(0.0, float(member.get("seconds") or 0.0))
+    lead = min(max(0.0, float(member.get("lead") or 0.0)), seconds)
+    water = seconds - lead
+    return pass_count(member.get("passes"), water), lead, water
+
+
 def step_wall_seconds(step: dict, soak_seconds: float = 0.0) -> float:
     """How long a step lasts: its slowest zone, extra passes and soaks included."""
     longest = 0.0
     for member in step["zones"]:
-        extra = max(0, int(member.get("passes") or 1) - 1)
+        passes, lead, _water = _member_passes(member)
         longest = max(
             longest,
-            float(member["seconds"])
-            + extra * (float(member.get("lead") or 0.0) + soak_seconds),
+            float(member["seconds"]) + (passes - 1) * (lead + soak_seconds),
         )
     return longest
 
@@ -550,6 +833,80 @@ def plan_wall_seconds(plan: list, soak_seconds: float = 0.0) -> float:
                 delay = float(step.get("delay") or 0.0)
                 total += delay if delay >= 0 else -overlap_seconds(delay, longest)
     return total
+
+
+# What a segment of the timeline is.
+SEGMENT_FILL = "fill"  # the lead time: the valve open, the pipe filling
+SEGMENT_WATER = "water"  # water reaching the zone
+SEGMENT_SOAK = "soak"  # the valve shut between two passes, the soil taking it in
+
+
+def plan_timeline(plan: list, soak_seconds: float = 0.0) -> dict:
+    """What a plan does second by second, for the panel to draw it.
+
+    Walks the plan as the runner does (``_walk_plan``): the steps one after the
+    other, a zone in its passes with the lead time paid again on every pass and
+    a soak between them, the delay after a step waited (or, negative, the next
+    step started before it ends), and every tour after the last. The supply's
+    own lead is left out, as in ``plan_wall_seconds``, whose total this ends on.
+
+    Returns ``{"total", "segments"}``: each segment is a dict with the zone id,
+    the tour, the step and the pass it belongs to (counted from 0), its kind
+    (``SEGMENT_*``) and its start and end in seconds from the run's start.
+    """
+    segments: list[dict] = []
+    clock = 0.0
+    end = 0.0
+    for tour_index, steps in enumerate(plan):
+        for step_index, step in enumerate(steps):
+            start = clock
+            for member in step["zones"]:
+                passes, lead, water = _member_passes(member)
+                at = start
+                for number in range(passes):
+                    base = {
+                        "zone_id": int(member["zone_id"]),
+                        "tour": tour_index,
+                        "step": step_index,
+                        "pass": number,
+                    }
+                    if lead > 0:
+                        segments.append(
+                            {
+                                **base,
+                                "kind": SEGMENT_FILL,
+                                "start": at,
+                                "end": at + lead,
+                            }
+                        )
+                        at += lead
+                    segments.append(
+                        {
+                            **base,
+                            "kind": SEGMENT_WATER,
+                            "start": at,
+                            "end": at + water / passes,
+                        }
+                    )
+                    at += water / passes
+                    if number < passes - 1 and soak_seconds > 0:
+                        segments.append(
+                            {
+                                **base,
+                                "kind": SEGMENT_SOAK,
+                                "start": at,
+                                "end": at + soak_seconds,
+                            }
+                        )
+                        at += soak_seconds
+            longest = step_wall_seconds(step, soak_seconds)
+            end = max(end, start + longest)
+            clock = start + longest
+            last = tour_index == len(plan) - 1 and step_index == len(steps) - 1
+            if not last:
+                delay = float(step.get("delay") or 0.0)
+                clock += delay if delay >= 0 else -overlap_seconds(delay, longest)
+    return {"total": end, "segments": segments}
 
 
 def drop_below_deficit(plan: list, zones) -> list:

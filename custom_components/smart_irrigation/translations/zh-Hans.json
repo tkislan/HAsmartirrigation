@@ -38,19 +38,7 @@
           "waiting": "等待中",
           "running": "运行中",
           "paused": "已暂停",
-          "suspended": "已挂起",
-          "disabled": "已禁用"
-        }
-      },
-      "program_main": {
-        "name": "主程序",
-        "state": {
-          "idle": "空闲",
-          "waiting": "等待中",
-          "running": "运行中",
-          "paused": "已暂停",
-          "suspended": "已挂起",
-          "disabled": "已禁用"
+          "suspended": "已挂起"
         }
       }
     },
@@ -113,6 +101,12 @@
       },
       "any_problem": {
         "name": "问题"
+      },
+      "leak": {
+        "name": "漏水"
+      },
+      "observed_watering": {
+        "name": "观察到的浇水"
       }
     },
     "switch": {
@@ -144,20 +138,13 @@
     }
   },
   "options": {
-    "error": {
-      "invalid_coordinates": "提供的坐标无效。请检查纬度（-90 至 90）和经度（-180 至 180）的值。"
-    },
     "step": {
-      "coordinates": {
-        "title": "位置坐标",
-        "description": "配置用于获取天气数据的位置坐标。如有需要，您可以使用与 Home Assistant 位置不同的手动坐标。",
-        "data": {
-          "manual_coordinates_enabled": "使用手动坐标而非 Home Assistant 位置",
-          "manual_latitude": "纬度（十进制度，-90 至 90）",
-          "manual_longitude": "经度（十进制度，-180 至 180）",
-          "manual_elevation": "海拔高度（米，可选）"
-        }
+      "init": {
+        "title": "Smart Irrigation"
       }
+    },
+    "abort": {
+      "use_panel": "Smart Irrigation 在其自己的面板中设置：在侧边栏打开 Smart Irrigation。读取天气所用的位置在 天气 › 天气服务（模式：高级）。"
     }
   },
   "services": {
@@ -325,7 +312,7 @@
     },
     "run_program": {
       "name": "运行程序",
-      "description": "立即运行完整控制器的一个程序；如果另一个程序正在运行，则在轮到它时尽快运行。除非其步骤另有规定，程序按 Smart Irrigation 计算的时长为其区域浇水。",
+      "description": "立即运行一个程序；如果另一个程序正在运行，则在轮到它时尽快运行。除非其步骤另有规定，程序按 Smart Irrigation 计算的时长为其区域浇水。",
       "fields": {
         "program_id": {
           "name": "程序",
@@ -343,7 +330,7 @@
     },
     "stop_program": {
       "name": "停止程序",
-      "description": "停止一个程序。如果它正在运行，其打开的区域会按正常方式关闭，并计入已提供的水量；如果它正在等待轮次，则将其移出队列。未知的程序不做任何事。主程序用 stop_watering 停止。",
+      "description": "停止一个程序。如果它正在运行，其打开的区域会按正常方式关闭，并计入已提供的水量；如果它正在等待轮次，则将其移出队列。未知的程序不做任何事。要停止所有浇水，请用 stop_watering。",
       "fields": {
         "program_id": {
           "name": "程序",
@@ -352,8 +339,8 @@
       }
     },
     "set_program_enabled": {
-      "name": "启用或禁用程序",
-      "description": "开启或关闭完整控制器的一个程序，与其设置中的开关作用相同。",
+      "name": "开启或关闭程序的所有计划（已弃用）",
+      "description": "已弃用：开启或关闭一个程序的所有计划。程序不再有自己的开关；单个计划请使用 set_schedule_enabled。将于 2027.11 移除。",
       "fields": {
         "program_id": {
           "name": "程序",
@@ -443,7 +430,7 @@
     },
     "adjust_program": {
       "name": "调整程序",
-      "description": "在一段时间内让完整控制器的某个程序浇得更久或更短。调整会替换之前的调整（从不叠加），适用于设置之后开始的运行，并在给定的小时数后结束。",
+      "description": "在一段时间内让某个程序浇得更久或更短。调整会替换之前的调整（从不叠加），适用于设置之后开始的运行，并在给定的小时数后结束。",
       "fields": {
         "program_id": {
           "name": "程序",
@@ -761,9 +748,39 @@
       "title": "操作 {action} 即将移除",
       "description": "某个自动化、脚本或仪表板调用了 **{action}**。它目前仍然有效，但将从 {version} 版本起移除，时间在冬季、浇水季之外。\n\n请改用 **{replacement}**：它的作用相同，未选择区域时作用于所有区域。每次调用旧名称时此通知都会再次出现，直到不再有任何调用。"
     },
+    "deprecated_program_enabled": {
+      "title": "操作 {action} 即将移除",
+      "description": "某个自动化、脚本或仪表板调用了 **{action}**。程序不再有自己的开关，因此它现在会开启或关闭该程序的所有计划。它将从 {version} 版本起移除，在冬季、浇水季节之外。\n\n请改用 **{replacement}**，每个计划调用一次。每次调用旧名称时此通知都会再次出现，直到不再有调用。"
+    },
     "deprecated_recurring_schedule": {
       "title": "循环时间表即将移除：{action}",
       "description": "某个自动化、脚本或仪表板调用了 **{action}**。循环时间表目前仍然有效，但将从 {version} 版本起移除，时间在冬季、浇水季之外。\n\n程序的时间表可以做同样的事，并且就在面板中：在 **浇水** 下设置它们，然后移除循环时间表以及对 {action} 的调用。"
+    },
+    "zone_set_aside": {
+      "title": "区域 {zone} 已被搁置",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "恢复区域 {zone}",
+            "description": "区域 **{zone}** 的阀门连续 {count} 次失败（未打开、没有出水，或无法设置其定时器），因此 Smart Irrigation 停止了对它浇水。\n\n请检查阀门、电源或电池以及供水。看到阀门打开时（例如手动试开），区域会自动恢复。也可以现在恢复它。\n\nSmart Irrigation 将从下一次浇水起重新为区域 {zone} 浇水，并从零开始计算失败次数。"
+          }
+        }
+      }
+    },
+    "leak": {
+      "title": "所有阀门关闭时仍有水流",
+      "description": "水表 **{meter}** 在 {zones} 的所有阀门关闭时计量了 {litres} 升。可能有管道漏水或阀门卡在打开状态。\n\n水表静止半小时后提醒会自动消失。`smart_irrigation_leak` 事件和漏水传感器可让自动化关闭总阀。"
+    },
+    "moved_to_calculate_and_water": {
+      "title": "直接阀门控制现在是“计算并浇水”",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "您的浇水照常进行",
+            "description": "Smart Irrigation 现在只用一个设置来决定它做什么：**计算并浇水**、**仅计算**或**全部停止**，位于“设置”选项卡。您的安装此前会自行打开阀门，因此已切换为**计算并浇水**。\n\n您的区域照常在相同时间浇水：启动触发器已变为**浇水**程序的一个时间表，位于新的**浇水**选项卡。如果不希望 Smart Irrigation 再打开阀门，请选择**仅计算**。"
+          }
+        }
+      }
     }
   }
 }

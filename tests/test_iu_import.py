@@ -434,7 +434,7 @@ def test_what_cannot_come_along_is_said():
     assert "no valve" in notes
 
 
-def test_a_disabled_controller_imports_its_programs_disabled():
+def test_a_disabled_controller_imports_its_schedules_switched_off():
     plan = plan_import(
         {
             "controllers": {
@@ -444,7 +444,11 @@ def test_a_disabled_controller_imports_its_programs_disabled():
             }
         }
     )
-    assert plan["programs"][0]["enabled"] is False
+    program = plan["programs"][0]
+    # A program has no on/off of its own: nothing starts it on its own.
+    assert "enabled" not in program
+    assert program["schedules"]
+    assert all(s["enabled"] is False for s in program["schedules"])
 
 
 def test_nothing_to_import_is_no_error():
@@ -910,3 +914,51 @@ def test_a_step_is_fed_only_when_all_its_zones_are():
         DURATION_CALCULATED,
     ]
     assert program["steps"][0]["seconds"] == 600
+
+
+def _controller(name, master=None):
+    controller = {
+        "name": name,
+        "zones": [
+            {
+                "name": f"{name} bed",
+                "schedules": [{"time": "06:00", "duration": "00:10"}],
+            }
+        ],
+    }
+    if master:
+        controller["entity_id"] = master
+    return controller
+
+
+def _queue_notes(plan):
+    return [i for i in plan["report"]["items"] if i.get("code") == "shared_queue"]
+
+
+def test_controllers_with_a_master_water_side_by_side_as_in_iu():
+    # Each master becomes a supply, and each supply has its own queue.
+    plan = plan_import(
+        {
+            "controllers": [
+                _controller("Front", "switch.front_pump"),
+                _controller("Back", "switch.back_pump"),
+            ]
+        }
+    )
+
+    assert _queue_notes(plan) == []
+
+
+def test_controllers_without_a_master_share_the_mains_and_say_so():
+    plan = plan_import(
+        {
+            "controllers": [
+                _controller("Front"),
+                _controller("Back"),
+                _controller("Well", "switch.well"),
+            ]
+        }
+    )
+
+    [note] = _queue_notes(plan)
+    assert note["params"] == {"count": 2}
